@@ -9,6 +9,7 @@ import {
 import { generateBoard } from '../utils/boardGenerator';
 import { canAppendTile } from '../utils/adjacency';
 import { submitWord } from '../utils/submission';
+import type { WordHistoryEntry } from '../models/WordHistoryEntry';
 
 // ─── Layout constants ───────────────────────────────────────────────────────
 const GAME_W = 480;
@@ -29,6 +30,7 @@ const COLOR_TEXT = 0xf5f5f5;
 const COLOR_TIMER_LOW = 0xe94560;
 const COLOR_ACCEPT = 0x4caf50;
 const COLOR_REJECT = 0xe94560;
+const WORD_HISTORY_LIMIT = 8;
 
 // ─── GameScene ───────────────────────────────────────────────────────────────
 
@@ -41,6 +43,7 @@ export class GameScene extends Phaser.Scene {
     private tileObjects: Phaser.GameObjects.Container[] = [];
     private pathGraphics!: Phaser.GameObjects.Graphics;
     private timerText!: Phaser.GameObjects.Text;
+    private scoreText!: Phaser.GameObjects.Text;
     private currentWordText!: Phaser.GameObjects.Text;
     private feedbackText!: Phaser.GameObjects.Text;
     private wordListText!: Phaser.GameObjects.Text;
@@ -245,13 +248,14 @@ export class GameScene extends Phaser.Scene {
         const result = submitWord(this.roundState, this.boardState.selectedPath);
 
         if (result.accepted) {
-            this.showFeedback(`✓  ${result.word}`, COLOR_ACCEPT);
+            this.showFeedback(`✓ ${result.word} (+${result.score})`, COLOR_ACCEPT);
         } else {
             const messages: Record<string, string> = {
                 round_not_running: 'Round has ended',
                 too_short: 'Word too short (min 3)',
                 duplicate: `"${result.word}" already submitted`,
                 invalid_path: 'Invalid path',
+                not_in_dictionary: `"${result.word}" is not in dictionary`,
             };
             this.showFeedback(messages[result.reason] ?? 'Rejected', COLOR_REJECT);
         }
@@ -279,6 +283,12 @@ export class GameScene extends Phaser.Scene {
             fontFamily: 'monospace',
             color: '#f5f5f5',
         }).setOrigin(0.5);
+
+        this.scoreText = this.add.text(28, 70, 'Score: 0', {
+            fontSize: '18px',
+            fontFamily: 'monospace',
+            color: '#f5f5f5',
+        }).setOrigin(0, 0.5);
 
         // Current word display
         this.currentWordText = this.add.text(GAME_W / 2, BOARD_ORIGIN_Y + BOARD_SIZE + 24, '', {
@@ -363,11 +373,27 @@ export class GameScene extends Phaser.Scene {
         const word = this.boardState.selectedPath.map((t) => t.letter).join('');
         this.currentWordText.setText(word);
 
+        this.scoreText.setText(`Score: ${this.roundState.score}`);
+
         // Word list
-        const words = this.roundState.submittedWords;
-        this.wordListText.setText(
-            words.length ? words.join('  ·  ') : '—',
-        );
+        this.wordListText.setText(this.formatWordHistory(this.roundState.wordHistory));
+    }
+
+    private formatWordHistory(entries: WordHistoryEntry[]): string {
+        if (entries.length === 0) {
+            return '—';
+        }
+
+        return entries
+            .slice(0, WORD_HISTORY_LIMIT)
+            .map((entry) => {
+                if (entry.status === 'accepted') {
+                    return `+${entry.score} ${entry.word}`;
+                }
+
+                return `x ${entry.word} (${entry.reason.replace(/_/g, ' ')})`;
+            })
+            .join('\n');
     }
 
     private showFeedback(msg: string, color: number, duration = 1600): void {

@@ -1,7 +1,11 @@
 import type { RoundState } from '../models/RoundState';
 import type { TileData } from '../models/Tile';
 import type { SubmissionResult } from '../models/SubmissionResult';
+import type { WordRejectionReason } from '../models/WordHistoryEntry';
 import { isValidPath } from './adjacency';
+import type { DictionaryService } from './dictionary';
+import { normalizeWord, ukDictionary } from './dictionary';
+import { scoreWord } from './scoring';
 
 const MIN_WORD_LENGTH = 3;
 
@@ -12,25 +16,40 @@ const MIN_WORD_LENGTH = 3;
 export function submitWord(
     round: RoundState,
     path: TileData[],
+    dictionary: DictionaryService = ukDictionary,
 ): SubmissionResult {
-    const word = path.map((t) => t.letter).join('').toUpperCase();
+    const word = normalizeWord(path.map((t) => t.letter).join(''));
+
+    const reject = (reason: WordRejectionReason): SubmissionResult => {
+        round.wordHistory.unshift({ status: 'rejected', word, reason });
+        return { accepted: false, word, reason };
+    };
 
     if (round.status !== 'running') {
-        return { accepted: false, word, reason: 'round_not_running' };
+        return reject('round_not_running');
     }
 
     if (!isValidPath(path)) {
-        return { accepted: false, word, reason: 'invalid_path' };
+        return reject('invalid_path');
     }
 
     if (word.length < MIN_WORD_LENGTH) {
-        return { accepted: false, word, reason: 'too_short' };
+        return reject('too_short');
     }
 
     if (round.submittedWords.includes(word)) {
-        return { accepted: false, word, reason: 'duplicate' };
+        return reject('duplicate');
     }
 
+    if (!dictionary.has(word)) {
+        return reject('not_in_dictionary');
+    }
+
+    const score = scoreWord(word);
+
     round.submittedWords.push(word);
-    return { accepted: true, word };
+    round.score += score;
+    round.wordHistory.unshift({ status: 'accepted', word, score });
+
+    return { accepted: true, word, score };
 }

@@ -1,9 +1,5 @@
-export type SubmissionRejectionReason =
-    | 'round_not_running'
-    | 'too_short'
-    | 'duplicate'
-    | 'invalid_path';
+import type { WordRejectionReason } from './WordHistoryEntry';
 
 export type SubmissionResult =
-    | { accepted: true; word: string }
-    | { accepted: false; word: string; reason: SubmissionRejectionReason };
+    | { accepted: true; word: string; score: number }
+    | { accepted: false; word: string; reason: WordRejectionReason };
