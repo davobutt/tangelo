@@ -1,0 +1,34 @@
+{
+  "name": "tangelo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davobutt/tangelo.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/davobutt/tangelo/issues"
+  },
+  "homepage": "https://github.com/davobutt/tangelo#readme",
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@vitest/ui": "^4.1.4",
+    "jsdom": "^29.0.2",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8",
+    "vitest": "^4.1.4"
+  }
+}
