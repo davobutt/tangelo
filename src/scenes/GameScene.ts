@@ -9,19 +9,31 @@ import {
 import { generateBoard } from '../utils/boardGenerator';
 import { canAppendTile } from '../utils/adjacency';
 import { submitWord } from '../utils/submission';
+import type { AcceptedSubmissionResult } from '../models/SubmissionResult';
 import type { WordHistoryEntry } from '../models/WordHistoryEntry';
 import { createHighScoreStore, type HighScoreStore } from '../utils/highScoreStorage';
+import { applyEdgeExpansions } from '../utils/endlessExpansion';
+import { applyExpansionTimeBonus } from '../utils/endlessTimer';
+import { tickRoundTimer } from '../utils/endlessRunLifecycle';
+import { getBoardBounds } from '../utils/boardGeometry';
+import { calculateBoardLayout, type BoardLayout } from '../utils/boardLayout';
+import { scoreSubmission } from '../utils/scoring';
 
 // ─── Layout constants ───────────────────────────────────────────────────────
 const GAME_W = 480;
 const GAME_H = 640;
 
-const BOARD_COLS = 4;
-const TILE_SIZE = 88;
-const TILE_GAP = 8;
-const BOARD_SIZE = BOARD_COLS * TILE_SIZE + (BOARD_COLS - 1) * TILE_GAP; // 380
-const BOARD_ORIGIN_X = (GAME_W - BOARD_SIZE) / 2; // 50
-const BOARD_ORIGIN_Y = 120;
+const BASE_TILE_SIZE = 72;
+const BASE_TILE_GAP = 8;
+const BOARD_VIEWPORT = {
+    x: 24,
+    y: 110,
+    width: GAME_W - 48,
+    height: 320,
+};
+
+const INITIAL_BOARD_SIZE = 4 * BASE_TILE_SIZE + 3 * BASE_TILE_GAP;
+const HUD_BOTTOM_ANCHOR_Y = BOARD_VIEWPORT.y + INITIAL_BOARD_SIZE;
 
 const COLOR_BG = 0x1a1a2e;
 const COLOR_TILE_IDLE = 0x16213e;
@@ -32,6 +44,7 @@ const COLOR_TIMER_LOW = 0xe94560;
 const COLOR_ACCEPT = 0x4caf50;
 const COLOR_REJECT = 0xe94560;
 const WORD_HISTORY_LIMIT = 8;
+const GROWTH_FADE_IN_MS = 260;
 
 // ─── GameScene ───────────────────────────────────────────────────────────────
 
@@ -57,6 +70,19 @@ export class GameScene extends Phaser.Scene {
 
     private highScoreStore: HighScoreStore = createHighScoreStore();
     private highScore = 0;
+    private boardMinRow = 0;
+    private boardMinCol = 0;
+    private boardLayout: BoardLayout = {
+        scale: 1,
+        tileSize: BASE_TILE_SIZE,
+        gap: BASE_TILE_GAP,
+        boardWidth: INITIAL_BOARD_SIZE,
+        boardHeight: INITIAL_BOARD_SIZE,
+        originX: BOARD_VIEWPORT.x + (BOARD_VIEWPORT.width - INITIAL_BOARD_SIZE) / 2,
+        originY: BOARD_VIEWPORT.y,
+        cols: 4,
+        rows: 4,
+    };
 
     constructor() {
         super({ key: 'GameScene' });
@@ -80,35 +106,28 @@ export class GameScene extends Phaser.Scene {
     private startRound(): void {
         // Tear down any previous round
         this.timerEvent?.remove(false);
-        this.tileObjects.forEach((c) => c.destroy());
-        this.tileObjects = [];
+        this.clearBoardObjects();
 
         // Fresh state
         const tiles = generateBoard();
         this.boardState = { tiles, selectedPath: [] };
         this.roundState = createRoundState();
-        this.roundState.status = 'running';
 
-        this.buildBoard();
+        this.rebuildBoard();
         this.updateHUD();
         this.submitButton.setVisible(true);
 
         // 60-second countdown
         this.timerEvent = this.time.addEvent({
             delay: 1000,
-            repeat: ROUND_DURATION_SECONDS - 1,
+            loop: true,
             callback: this.onTimerTick,
             callbackScope: this,
         });
     }
 
     private onTimerTick(): void {
-        this.roundState.timeRemaining = Math.max(
-            0,
-            this.roundState.timeRemaining - 1,
-        );
-
-        if (this.roundState.timeRemaining === 0) {
+        if (tickRoundTimer(this.roundState)) {
             this.endRound();
         } else {
             this.updateHUD();
@@ -135,28 +154,95 @@ export class GameScene extends Phaser.Scene {
 
     // ─── Board rendering ───────────────────────────────────────────────────────
 
+    private clearBoardObjects(): void {
+        this.tileObjects.forEach((c) => c.destroy());
+        this.tileObjects = [];
+    }
+
+    private rebuildBoard(): void {
+        this.clearBoardObjects();
+        this.buildBoard();
+    }
+
+    private animateGrowthPlacements(newTiles: TileData[]): void {
+        if (newTiles.length === 0) return;
+
+        const newTileIndexes = new Set(newTiles.map((tile) => tile.index));
+
+        this.tileObjects.forEach((container) => {
+            const c = container as unknown as { tileData: TileData };
+            if (!newTileIndexes.has(c.tileData.index)) return;
+
+            container.setAlpha(0);
+            this.tweens.add({
+                targets: container,
+                alpha: 1,
+                duration: GROWTH_FADE_IN_MS,
+                ease: 'Sine.easeOut',
+            });
+        });
+    }
+
+    private applyExpansionScore(
+        result: AcceptedSubmissionResult,
+        expandedEdgeCount: number,
+    ): AcceptedSubmissionResult {
+        const scoreBreakdown = scoreSubmission(result.baseScore, expandedEdgeCount);
+        const extraPoints = scoreBreakdown.totalScore - result.score;
+
+        if (extraPoints > 0) {
+            this.roundState.score += extraPoints;
+            const latest = this.roundState.wordHistory[0];
+            if (latest?.status === 'accepted') {
+                latest.score = scoreBreakdown.totalScore;
+            }
+        }
+
+        return {
+            ...result,
+            score: scoreBreakdown.totalScore,
+            baseScore: scoreBreakdown.baseScore,
+            expansionBonus: scoreBreakdown.expansionBonus,
+            expandedEdgeCount,
+        };
+    }
+
     private buildBoard(): void {
-        this.boardState.tiles.forEach((tile) => {
+        const bounds = getBoardBounds(this.boardState.tiles);
+        this.boardMinRow = bounds.minRow;
+        this.boardMinCol = bounds.minCol;
+        this.boardLayout = calculateBoardLayout(bounds, BOARD_VIEWPORT, {
+            tileSize: BASE_TILE_SIZE,
+            gap: BASE_TILE_GAP,
+            minScale: 0.4,
+            fitPadding: 0.95,
+        });
+
+        const sortedTiles = [...this.boardState.tiles].sort(
+            (a, b) => a.row - b.row || a.col - b.col,
+        );
+
+        sortedTiles.forEach((tile) => {
             const container = this.makeTileObject(tile);
             this.tileObjects.push(container);
         });
     }
 
     private makeTileObject(tile: TileData): Phaser.GameObjects.Container {
-        const x = BOARD_ORIGIN_X + tile.col * (TILE_SIZE + TILE_GAP) + TILE_SIZE / 2;
-        const y = BOARD_ORIGIN_Y + tile.row * (TILE_SIZE + TILE_GAP) + TILE_SIZE / 2;
+        const { x, y } = this.tileCenter(tile);
+        const tileSize = this.boardLayout.tileSize;
 
-        const bg = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, COLOR_TILE_IDLE, 1)
+        const bg = this.add.rectangle(0, 0, tileSize, tileSize, COLOR_TILE_IDLE, 1)
             .setStrokeStyle(2, 0x2a2a4e);
 
         const label = this.add.text(0, 0, tile.letter, {
-            fontSize: '36px',
+            fontSize: `${Math.max(18, Math.round(30 * this.boardLayout.scale))}px`,
             fontFamily: 'Georgia, serif',
             color: '#f5f5f5',
         }).setOrigin(0.5);
 
         const container = this.add.container(x, y, [bg, label]);
-        container.setSize(TILE_SIZE, TILE_SIZE);
+        container.setSize(tileSize, tileSize);
         container.setInteractive();
 
         container.on('pointerover', () => this.onTileHover(tile, bg));
@@ -229,8 +315,14 @@ export class GameScene extends Phaser.Scene {
 
     private tileCenter(tile: TileData): { x: number; y: number } {
         return {
-            x: BOARD_ORIGIN_X + tile.col * (TILE_SIZE + TILE_GAP) + TILE_SIZE / 2,
-            y: BOARD_ORIGIN_Y + tile.row * (TILE_SIZE + TILE_GAP) + TILE_SIZE / 2,
+            x:
+                this.boardLayout.originX +
+                (tile.col - this.boardMinCol) * (this.boardLayout.tileSize + this.boardLayout.gap) +
+                this.boardLayout.tileSize / 2,
+            y:
+                this.boardLayout.originY +
+                (tile.row - this.boardMinRow) * (this.boardLayout.tileSize + this.boardLayout.gap) +
+                this.boardLayout.tileSize / 2,
         };
     }
 
@@ -239,7 +331,7 @@ export class GameScene extends Phaser.Scene {
         const path = this.boardState.selectedPath;
         if (path.length < 2) return;
 
-        this.pathGraphics.lineStyle(4, COLOR_TILE_SELECTED, 0.6);
+        this.pathGraphics.lineStyle(Math.max(2, 4 * this.boardLayout.scale), COLOR_TILE_SELECTED, 0.6);
         this.pathGraphics.beginPath();
         const firstTile = path[0];
         if (!firstTile) return;
@@ -257,10 +349,25 @@ export class GameScene extends Phaser.Scene {
     // ─── Submission ────────────────────────────────────────────────────────────
 
     private onSubmit(): void {
+        const submittedPath = [...this.boardState.selectedPath];
         const result = submitWord(this.roundState, this.boardState.selectedPath);
 
         if (result.accepted) {
-            this.showFeedback(`✓ ${result.word} (+${result.score})`, COLOR_ACCEPT);
+            const expansion = applyEdgeExpansions(this.boardState.tiles, submittedPath);
+            const scoredResult = this.applyExpansionScore(result, expansion.expandedEdges.length);
+            const timeBonus = applyExpansionTimeBonus(this.roundState, expansion.expandedEdges.length);
+            this.rebuildBoard();
+            this.animateGrowthPlacements(expansion.placements.map((placement) => placement.tile));
+
+            if (expansion.placements.length > 0) {
+                const edges = expansion.expandedEdges.join(', ').toUpperCase();
+                this.showFeedback(
+                    `✓ ${scoredResult.word} (+${scoredResult.score}: ${scoredResult.baseScore}+${scoredResult.expansionBonus}) | +${expansion.placements.length} (${edges}) | +${timeBonus}s`,
+                    COLOR_ACCEPT,
+                );
+            } else {
+                this.showFeedback(`✓ ${scoredResult.word} (+${scoredResult.score})`, COLOR_ACCEPT);
+            }
         } else {
             const messages: Record<string, string> = {
                 round_not_running: 'Round has ended',
@@ -309,7 +416,7 @@ export class GameScene extends Phaser.Scene {
         }).setOrigin(1, 0.5);
 
         // Current word display
-        this.currentWordText = this.add.text(GAME_W / 2, BOARD_ORIGIN_Y + BOARD_SIZE + 24, '', {
+        this.currentWordText = this.add.text(GAME_W / 2, HUD_BOTTOM_ANCHOR_Y + 24, '', {
             fontSize: '26px',
             fontFamily: 'Georgia, serif',
             color: '#f5f5f5',
@@ -317,7 +424,7 @@ export class GameScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // Feedback message
-        this.feedbackText = this.add.text(GAME_W / 2, BOARD_ORIGIN_Y + BOARD_SIZE + 58, '', {
+        this.feedbackText = this.add.text(GAME_W / 2, HUD_BOTTOM_ANCHOR_Y + 58, '', {
             fontSize: '16px',
             fontFamily: 'sans-serif',
             color: '#4caf50',
@@ -326,7 +433,7 @@ export class GameScene extends Phaser.Scene {
         // Submit button
         this.submitButton = this.makeButton(
             GAME_W / 2,
-            BOARD_ORIGIN_Y + BOARD_SIZE + 96,
+            HUD_BOTTOM_ANCHOR_Y + 96,
             'SUBMIT',
             () => this.onSubmit(),
         );
@@ -343,14 +450,14 @@ export class GameScene extends Phaser.Scene {
         );
 
         // Word list label
-        this.add.text(28, BOARD_ORIGIN_Y + BOARD_SIZE + 148, 'Words:', {
+        this.add.text(28, HUD_BOTTOM_ANCHOR_Y + 148, 'Words:', {
             fontSize: '14px',
             fontFamily: 'sans-serif',
             color: '#888',
         });
 
         // Word list scrollable area
-        this.wordListText = this.add.text(28, BOARD_ORIGIN_Y + BOARD_SIZE + 168, '', {
+        this.wordListText = this.add.text(28, HUD_BOTTOM_ANCHOR_Y + 168, '', {
             fontSize: '14px',
             fontFamily: 'monospace',
             color: '#ccc',

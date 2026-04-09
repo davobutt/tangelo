@@ -1,4 +1,5 @@
-const HIGH_SCORE_KEY = 'tangelo.highScore';
+const HIGH_SCORE_KEY = 'tangelo.endless.highScore';
+const LEGACY_HIGH_SCORE_KEY = 'tangelo.highScore';
 
 export interface HighScoreStore {
     get(): number;
@@ -42,12 +43,20 @@ export function createHighScoreStore(storage: Storage | null = tryGetLocalStorag
         get: () => {
             try {
                 const raw = storage.getItem(HIGH_SCORE_KEY);
-                if (raw === null) {
+                if (raw !== null) {
+                    const score = toScore(raw);
+                    inMemoryScore = Math.max(inMemoryScore, score);
                     return inMemoryScore;
                 }
 
-                const score = toScore(raw);
+                const legacyRaw = storage.getItem(LEGACY_HIGH_SCORE_KEY);
+                if (legacyRaw === null) {
+                    return inMemoryScore;
+                }
+
+                const score = toScore(legacyRaw);
                 inMemoryScore = Math.max(inMemoryScore, score);
+                storage.setItem(HIGH_SCORE_KEY, String(inMemoryScore));
                 return inMemoryScore;
             } catch {
                 return inMemoryScore;

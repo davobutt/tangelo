@@ -40,6 +40,15 @@ class ThrowingStorage extends MemoryStorage {
 }
 
 describe('createHighScoreStore', () => {
+    it('migrates legacy high score key into endless-mode key', () => {
+        const storage = new MemoryStorage();
+        storage.setItem('tangelo.highScore', '14');
+
+        const store = createHighScoreStore(storage);
+        expect(store.get()).toBe(14);
+        expect(storage.getItem('tangelo.endless.highScore')).toBe('14');
+    });
+
     it('persists high score in storage when available', () => {
         const storage = new MemoryStorage();
         const store = createHighScoreStore(storage);

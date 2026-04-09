@@ -1,6 +1,6 @@
 export interface TileData {
-    index: number; // 0–15, row-major
-    row: number;   // 0–3
-    col: number;   // 0–3
+    index: number; // unique per tile in the current board state
+    row: number;
+    col: number;
     letter: string;
 }

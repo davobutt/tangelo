@@ -1,4 +1,4 @@
-export type RoundStatus = 'idle' | 'running' | 'ended';
+export type RoundStatus = 'running' | 'ended';
 
 export interface RoundState {
     status: RoundStatus;
@@ -12,7 +12,7 @@ export const ROUND_DURATION_SECONDS = 60;
 
 export function createRoundState(): RoundState {
     return {
-        status: 'idle',
+        status: 'running',
         timeRemaining: ROUND_DURATION_SECONDS,
         submittedWords: [],
         score: 0,

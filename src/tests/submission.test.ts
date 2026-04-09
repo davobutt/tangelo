@@ -19,7 +19,6 @@ let dictionary: DictionaryService;
 
 beforeEach(() => {
     round = createRoundState();
-    round.status = 'running';
     dictionary = new DictionaryService(['CAT', 'DOG', 'THEATRE', 'NEIGHBOUR']);
 });
 
@@ -28,17 +27,15 @@ describe('submitWord', () => {
         const result = submitWord(round, validPath, dictionary);
         expect(result.accepted).toBe(true);
         expect(result.word).toBe('CAT');
-        if (result.accepted) expect(result.score).toBe(1);
+        if (result.accepted) {
+            expect(result.score).toBe(1);
+            expect(result.baseScore).toBe(1);
+            expect(result.expansionBonus).toBe(0);
+            expect(result.expandedEdgeCount).toBe(0);
+        }
         expect(round.submittedWords).toContain('CAT');
         expect(round.score).toBe(1);
         expect(round.wordHistory[0]).toMatchObject({ status: 'accepted', word: 'CAT', score: 1 });
-    });
-
-    it('rejects submission when round has not started (idle)', () => {
-        round.status = 'idle';
-        const result = submitWord(round, validPath, dictionary);
-        expect(result.accepted).toBe(false);
-        if (!result.accepted) expect(result.reason).toBe('round_not_running');
     });
 
     it('rejects submission after round ends', () => {

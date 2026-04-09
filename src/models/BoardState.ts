@@ -1,6 +1,6 @@
 import type { TileData } from './Tile';
 
 export interface BoardState {
-    tiles: TileData[];       // length 16, row-major
+    tiles: TileData[];       // sparse/irregular board occupancy
     selectedPath: TileData[]; // ordered selection for current word
 }

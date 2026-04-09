@@ -5,7 +5,7 @@ import type { WordRejectionReason } from '../models/WordHistoryEntry';
 import { isValidPath } from './adjacency';
 import type { DictionaryService } from './dictionary';
 import { normalizeWord, ukDictionary } from './dictionary';
-import { scoreWord } from './scoring';
+import { scoreSubmission, scoreWord } from './scoring';
 
 const MIN_WORD_LENGTH = 3;
 
@@ -45,11 +45,19 @@ export function submitWord(
         return reject('not_in_dictionary');
     }
 
-    const score = scoreWord(word);
+    const baseScore = scoreWord(word);
+    const scoreBreakdown = scoreSubmission(baseScore, 0);
 
     round.submittedWords.push(word);
-    round.score += score;
-    round.wordHistory.unshift({ status: 'accepted', word, score });
+    round.score += scoreBreakdown.totalScore;
+    round.wordHistory.unshift({ status: 'accepted', word, score: scoreBreakdown.totalScore });
 
-    return { accepted: true, word, score };
+    return {
+        accepted: true,
+        word,
+        score: scoreBreakdown.totalScore,
+        baseScore: scoreBreakdown.baseScore,
+        expansionBonus: scoreBreakdown.expansionBonus,
+        expandedEdgeCount: 0,
+    };
 }
