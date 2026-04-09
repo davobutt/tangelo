@@ -10,6 +10,7 @@ import { generateBoard } from '../utils/boardGenerator';
 import { canAppendTile } from '../utils/adjacency';
 import { submitWord } from '../utils/submission';
 import type { WordHistoryEntry } from '../models/WordHistoryEntry';
+import { createHighScoreStore, type HighScoreStore } from '../utils/highScoreStorage';
 
 // ─── Layout constants ───────────────────────────────────────────────────────
 const GAME_W = 480;
@@ -44,14 +45,18 @@ export class GameScene extends Phaser.Scene {
     private pathGraphics!: Phaser.GameObjects.Graphics;
     private timerText!: Phaser.GameObjects.Text;
     private scoreText!: Phaser.GameObjects.Text;
+    private highScoreText!: Phaser.GameObjects.Text;
     private currentWordText!: Phaser.GameObjects.Text;
     private feedbackText!: Phaser.GameObjects.Text;
     private wordListText!: Phaser.GameObjects.Text;
     private submitButton!: Phaser.GameObjects.Container;
-    private newRoundButton!: Phaser.GameObjects.Container;
+    private restartButton!: Phaser.GameObjects.Container;
 
     // Timer tracking
     private timerEvent!: Phaser.Time.TimerEvent;
+
+    private highScoreStore: HighScoreStore = createHighScoreStore();
+    private highScore = 0;
 
     constructor() {
         super({ key: 'GameScene' });
@@ -63,6 +68,8 @@ export class GameScene extends Phaser.Scene {
         this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, COLOR_BG);
 
         this.pathGraphics = this.add.graphics();
+
+        this.highScore = this.highScoreStore.get();
 
         this.buildHUD();
         this.startRound();
@@ -84,7 +91,6 @@ export class GameScene extends Phaser.Scene {
 
         this.buildBoard();
         this.updateHUD();
-        this.newRoundButton.setVisible(false);
         this.submitButton.setVisible(true);
 
         // 60-second countdown
@@ -113,12 +119,18 @@ export class GameScene extends Phaser.Scene {
         this.roundState.status = 'ended';
         this.timerEvent.remove(false);
         this.boardState.selectedPath = [];
+
+        if (this.roundState.score > this.highScore) {
+            this.highScore = this.roundState.score;
+            this.highScoreStore.set(this.highScore);
+            this.showFeedback(`New High Score: ${this.highScore}!`, COLOR_ACCEPT, 0);
+        } else {
+            this.showFeedback("Time's up!", COLOR_REJECT, 0);
+        }
+
         this.updateHUD();
         this.redrawPath();
         this.refreshTileHighlights();
-        this.submitButton.setVisible(false);
-        this.newRoundButton.setVisible(true);
-        this.showFeedback("Time's up!", COLOR_REJECT, 0);
     }
 
     // ─── Board rendering ───────────────────────────────────────────────────────
@@ -290,6 +302,12 @@ export class GameScene extends Phaser.Scene {
             color: '#f5f5f5',
         }).setOrigin(0, 0.5);
 
+        this.highScoreText = this.add.text(GAME_W - 28, 70, `High: ${this.highScore}`, {
+            fontSize: '18px',
+            fontFamily: 'monospace',
+            color: '#f5f5f5',
+        }).setOrigin(1, 0.5);
+
         // Current word display
         this.currentWordText = this.add.text(GAME_W / 2, BOARD_ORIGIN_Y + BOARD_SIZE + 24, '', {
             fontSize: '26px',
@@ -313,15 +331,16 @@ export class GameScene extends Phaser.Scene {
             () => this.onSubmit(),
         );
 
-        // New Round button (hidden until round ends)
-        this.newRoundButton = this.makeButton(
-            GAME_W / 2,
-            BOARD_ORIGIN_Y + BOARD_SIZE + 96,
-            'NEW ROUND',
-            () => this.startRound(),
+        this.restartButton = this.makeButton(
+            GAME_W - 90,
+            30,
+            'RESTART',
+            () => {
+                this.startRound();
+                this.showFeedback('Round restarted', COLOR_ACCEPT);
+            },
             0x0f3460,
         );
-        this.newRoundButton.setVisible(false);
 
         // Word list label
         this.add.text(28, BOARD_ORIGIN_Y + BOARD_SIZE + 148, 'Words:', {
@@ -374,6 +393,7 @@ export class GameScene extends Phaser.Scene {
         this.currentWordText.setText(word);
 
         this.scoreText.setText(`Score: ${this.roundState.score}`);
+        this.highScoreText.setText(`High: ${this.highScore}`);
 
         // Word list
         this.wordListText.setText(this.formatWordHistory(this.roundState.wordHistory));
