@@ -3,9 +3,7 @@ import type { TileData } from '../models/Tile';
 import {
     buildOccupiedSet,
     coordKey,
-    getBoardBounds,
     getNextTileIndex,
-    type BoardBounds,
 } from './boardGeometry';
 
 const LETTERS_PER_EDGE = 4;
@@ -33,11 +31,11 @@ function normalizeLetter(raw: string): string {
     return normalized.length > 0 ? normalized[0] ?? 'A' : 'A';
 }
 
-function touchesEdge(tile: TileData, edge: BoardEdge, bounds: BoardBounds): boolean {
-    if (edge === 'top') return tile.row === bounds.minRow;
-    if (edge === 'bottom') return tile.row === bounds.maxRow;
-    if (edge === 'left') return tile.col === bounds.minCol;
-    return tile.col === bounds.maxCol;
+function isFrontierTile(tile: TileData, edge: BoardEdge, occupied: Set<string>): boolean {
+    if (edge === 'top') return !occupied.has(coordKey(tile.row - 1, tile.col));
+    if (edge === 'bottom') return !occupied.has(coordKey(tile.row + 1, tile.col));
+    if (edge === 'left') return !occupied.has(coordKey(tile.row, tile.col - 1));
+    return !occupied.has(coordKey(tile.row, tile.col + 1));
 }
 
 function edgeAxisValue(tile: TileData, edge: BoardEdge): number {
@@ -48,32 +46,59 @@ function axisCornerDistance(axis: number, axisMin: number, axisMax: number): num
     return Math.min(Math.abs(axis - axisMin), Math.abs(axisMax - axis));
 }
 
-function buildEdgeCells(edge: BoardEdge, bounds: BoardBounds): AxisPlacement[] {
+function buildFrontierEdgeCells(
+    edge: BoardEdge,
+    allTiles: TileData[],
+    occupied: Set<string>,
+): AxisPlacement[] {
     const placements: AxisPlacement[] = [];
 
     if (edge === 'top' || edge === 'bottom') {
-        const row = edge === 'top' ? bounds.minRow - 1 : bounds.maxRow + 1;
-        for (let col = bounds.minCol; col <= bounds.maxCol; col++) {
-            placements.push({ row, col, axis: col });
+        const byCol = new Map<number, number>();
+        for (const tile of allTiles) {
+            const existing = byCol.get(tile.col);
+            if (edge === 'top') {
+                if (existing === undefined || tile.row < existing) byCol.set(tile.col, tile.row);
+            } else {
+                if (existing === undefined || tile.row > existing) byCol.set(tile.col, tile.row);
+            }
         }
-        return placements;
+        for (const [col, row] of byCol) {
+            const nextRow = edge === 'top' ? row - 1 : row + 1;
+            if (!occupied.has(coordKey(nextRow, col))) {
+                placements.push({ row: nextRow, col, axis: col });
+            }
+        }
+    } else {
+        const byRow = new Map<number, number>();
+        for (const tile of allTiles) {
+            const existing = byRow.get(tile.row);
+            if (edge === 'left') {
+                if (existing === undefined || tile.col < existing) byRow.set(tile.row, tile.col);
+            } else {
+                if (existing === undefined || tile.col > existing) byRow.set(tile.row, tile.col);
+            }
+        }
+        for (const [row, col] of byRow) {
+            const nextCol = edge === 'left' ? col - 1 : col + 1;
+            if (!occupied.has(coordKey(row, nextCol))) {
+                placements.push({ row, col: nextCol, axis: row });
+            }
+        }
     }
 
-    const col = edge === 'left' ? bounds.minCol - 1 : bounds.maxCol + 1;
-    for (let row = bounds.minRow; row <= bounds.maxRow; row++) {
-        placements.push({ row, col, axis: row });
-    }
+    placements.sort((a, b) => a.axis - b.axis);
     return placements;
 }
 
 function planEdgePlacements(
     edge: BoardEdge,
     edgeTiles: TileData[],
-    bounds: BoardBounds,
+    allTiles: TileData[],
     occupied: Set<string>,
     lettersPerEdge: number,
 ): AxisPlacement[] {
-    const edgeCells = buildEdgeCells(edge, bounds);
+    const edgeCells = buildFrontierEdgeCells(edge, allTiles, occupied);
     if (edgeCells.length === 0) return [];
 
     const axisCenter =
@@ -130,7 +155,7 @@ function planEdgePlacements(
 export function getQualifiedEdges(path: TileData[], tiles: TileData[]): BoardEdge[] {
     if (path.length < 2 || tiles.length === 0) return [];
 
-    const bounds = getBoardBounds(tiles);
+    const occupied = buildOccupiedSet(tiles);
     const edgeCounts: Record<BoardEdge, number> = {
         top: 0,
         right: 0,
@@ -139,10 +164,10 @@ export function getQualifiedEdges(path: TileData[], tiles: TileData[]): BoardEdg
     };
 
     for (const tile of path) {
-        if (tile.row === bounds.minRow) edgeCounts.top += 1;
-        if (tile.row === bounds.maxRow) edgeCounts.bottom += 1;
-        if (tile.col === bounds.minCol) edgeCounts.left += 1;
-        if (tile.col === bounds.maxCol) edgeCounts.right += 1;
+        if (isFrontierTile(tile, 'top', occupied)) edgeCounts.top += 1;
+        if (isFrontierTile(tile, 'bottom', occupied)) edgeCounts.bottom += 1;
+        if (isFrontierTile(tile, 'left', occupied)) edgeCounts.left += 1;
+        if (isFrontierTile(tile, 'right', occupied)) edgeCounts.right += 1;
     }
 
     return (['top', 'right', 'bottom', 'left'] as const).filter(
@@ -166,7 +191,6 @@ export function applyEdgeExpansions(
     const lettersPerEdge = options.lettersPerEdge ?? LETTERS_PER_EDGE;
     const letterGenerator = options.letterGenerator ?? randomLetter;
 
-    const bounds = getBoardBounds(tiles);
     const occupied = buildOccupiedSet(tiles);
     const qualifiedEdges = getQualifiedEdges(path, tiles);
     const expandedEdges: BoardEdge[] = [];
@@ -175,8 +199,8 @@ export function applyEdgeExpansions(
     let nextIndex = getNextTileIndex(tiles);
 
     for (const edge of qualifiedEdges) {
-        const edgeTiles = path.filter((tile) => touchesEdge(tile, edge, bounds));
-        const planned = planEdgePlacements(edge, edgeTiles, bounds, occupied, lettersPerEdge);
+        const edgeTiles = path.filter((tile) => isFrontierTile(tile, edge, occupied));
+        const planned = planEdgePlacements(edge, edgeTiles, tiles, occupied, lettersPerEdge);
 
         if (planned.length > 0) {
             expandedEdges.push(edge);

@@ -152,4 +152,69 @@ describe('endless expansion engine', () => {
 
         expect(cols).toEqual([1, 2, 3, 4]);
     });
+
+    it('frontier detection qualifies tiles not at bounding-box extreme after partial expansion', () => {
+        // 4x4 board with right side of bottom already expanded to row 4
+        const tiles = makeRectBoard(4, 4);
+        tiles.push({ index: 16, row: 4, col: 2, letter: 'X' });
+        tiles.push({ index: 17, row: 4, col: 3, letter: 'X' });
+
+        // Path on the un-expanded left side — NOT at bounds.maxRow (4)
+        const path = [findTile(tiles, 3, 0), findTile(tiles, 3, 1)];
+
+        const edges = getQualifiedEdges(path, tiles);
+        expect(edges).toContain('bottom');
+    });
+
+    it('gap-fill expansion places tiles at correct irregular depths', () => {
+        // 4x4 board with right side already expanded: row 4, cols 2-3
+        const tiles = makeRectBoard(4, 4);
+        tiles.push({ index: 16, row: 4, col: 2, letter: 'X' });
+        tiles.push({ index: 17, row: 4, col: 3, letter: 'X' });
+
+        const path = [findTile(tiles, 3, 0), findTile(tiles, 3, 1)];
+        const result = applyEdgeExpansions(tiles, path, { letterGenerator: () => 'G' });
+
+        expect(result.qualifiedEdges).toContain('bottom');
+        const bottomPlacements = result.placements.filter((p) => p.edge === 'bottom');
+
+        // Frontier at col 0,1 is row 4 (gap); frontier at col 2,3 is row 5 (beyond prior expansion)
+        expect(bottomPlacements).toHaveLength(4);
+        const byCol: Record<number, number> = {};
+        bottomPlacements.forEach((p) => { byCol[p.tile.col] = p.tile.row; });
+        expect(byCol[0]).toBe(4);
+        expect(byCol[1]).toBe(4);
+        expect(byCol[2]).toBe(5);
+        expect(byCol[3]).toBe(5);
+    });
+
+    it('after gap is filled subsequent submissions expand from the new per-column frontier', () => {
+        const tiles = makeRectBoard(4, 4);
+        tiles.push({ index: 16, row: 4, col: 2, letter: 'X' });
+        tiles.push({ index: 17, row: 4, col: 3, letter: 'X' });
+
+        // First submission: fills gap → (4,0),(4,1) placed + frontier for cols 2,3 advances to (5,2),(5,3)
+        applyEdgeExpansions(tiles, [findTile(tiles, 3, 0), findTile(tiles, 3, 1)], { letterGenerator: () => 'G' });
+        // tiles = 16 original + 2 manual + 4 expansion = 22
+
+        // Second submission: path on newly placed (4,0),(4,1)
+        const result2 = applyEdgeExpansions(
+            tiles,
+            [findTile(tiles, 4, 0), findTile(tiles, 4, 1)],
+            { letterGenerator: () => 'H' },
+        );
+
+        expect(result2.qualifiedEdges).toContain('bottom');
+        const byCol: Record<number, number> = {};
+        result2.placements
+            .filter((p) => p.edge === 'bottom')
+            .forEach((p) => { byCol[p.tile.col] = p.tile.row; });
+
+        // Cols 0,1 frontier was at row 4 → now expands to row 5
+        expect(byCol[0]).toBe(5);
+        expect(byCol[1]).toBe(5);
+        // Cols 2,3 were already at row 5 → frontier is row 6
+        expect(byCol[2]).toBe(6);
+        expect(byCol[3]).toBe(6);
+    });
 });
