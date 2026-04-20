@@ -36,4 +36,18 @@ describe('generateBoard', () => {
         // It's possible but astronomically unlikely they match
         expect(a === b).toBe(false);
     });
+
+    it('reproduces the same starting board for the same seed', () => {
+        const a = generateBoard({ seed: 'family-night' });
+        const b = generateBoard({ seed: 'family-night' });
+
+        expect(a).toEqual(b);
+    });
+
+    it('produces different reproducible boards for different seeds', () => {
+        const a = generateBoard({ seed: 'seed-a' }).map((tile) => tile.letter).join('');
+        const b = generateBoard({ seed: 'seed-b' }).map((tile) => tile.letter).join('');
+
+        expect(a).not.toBe(b);
+    });
 });

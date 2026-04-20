@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { TileData } from '../models/Tile';
+import { generateBoard } from '../utils/boardGenerator';
 import { applyEdgeExpansions, getQualifiedEdges } from '../utils/endlessExpansion';
 
 function makeRectBoard(rows: number, cols: number, rowOffset = 0, colOffset = 0): TileData[] {
@@ -300,5 +301,45 @@ describe('endless expansion engine', () => {
         });
         expect(Math.max(...tiles.map((tile) => tile.col)) - Math.min(...tiles.map((tile) => tile.col)) + 1).toBe(10);
         expect(Math.max(...tiles.map((tile) => tile.row)) - Math.min(...tiles.map((tile) => tile.row)) + 1).toBe(10);
+    });
+
+    it('reuses the same letters for the same seed and revealed coordinates', () => {
+        const seed = 'repeatable-run';
+        const boardA = generateBoard({ seed });
+        const boardB = generateBoard({ seed });
+        const pathA = [findTile(boardA, 0, 0), findTile(boardA, 0, 1), findTile(boardA, 0, 2)];
+        const pathB = [findTile(boardB, 0, 0), findTile(boardB, 0, 1), findTile(boardB, 0, 2)];
+
+        const resultA = applyEdgeExpansions(boardA, pathA, { seed });
+        const resultB = applyEdgeExpansions(boardB, pathB, { seed });
+
+        expect(resultA.placements.map((placement) => placement.tile)).toEqual(
+            resultB.placements.map((placement) => placement.tile),
+        );
+    });
+
+    it('produces the same final revealed grid for the same seed across different valid expansion orders', () => {
+        const seed = 'shared-daily';
+        const topFirst = generateBoard({ seed });
+        const bottomFirst = generateBoard({ seed });
+        const topPathA = [findTile(topFirst, 0, 0), findTile(topFirst, 0, 1), findTile(topFirst, 0, 2)];
+        const bottomPathA = [findTile(topFirst, 3, 0), findTile(topFirst, 3, 1), findTile(topFirst, 3, 2)];
+        const bottomPathB = [findTile(bottomFirst, 3, 0), findTile(bottomFirst, 3, 1), findTile(bottomFirst, 3, 2)];
+        const topPathB = [findTile(bottomFirst, 0, 0), findTile(bottomFirst, 0, 1), findTile(bottomFirst, 0, 2)];
+
+        applyEdgeExpansions(topFirst, topPathA, { seed });
+        applyEdgeExpansions(topFirst, bottomPathA, { seed });
+
+        applyEdgeExpansions(bottomFirst, bottomPathB, { seed });
+        applyEdgeExpansions(bottomFirst, topPathB, { seed });
+
+        const finalGridA = [...topFirst]
+            .sort((a, b) => a.row - b.row || a.col - b.col)
+            .map((tile) => `${tile.row},${tile.col}:${tile.letter}`);
+        const finalGridB = [...bottomFirst]
+            .sort((a, b) => a.row - b.row || a.col - b.col)
+            .map((tile) => `${tile.row},${tile.col}:${tile.letter}`);
+
+        expect(finalGridA).toEqual(finalGridB);
     });
 });

@@ -140,6 +140,7 @@ export class GameScene extends Phaser.Scene {
 
     private highScoreStore: HighScoreStore = createHighScoreStore();
     private highScore = 0;
+    private activeRunSeed: string | null = null;
     private tileLetterColors = new Map<number, number>();
     private boardMinRow = 0;
     private boardMinCol = 0;
@@ -189,7 +190,13 @@ export class GameScene extends Phaser.Scene {
         this.clearBoardObjects();
 
         // Fresh state
-        const tiles = generateBoard();
+        const configuredSeed = this.registry.get('runSeed');
+        this.activeRunSeed = typeof configuredSeed === 'string' && configuredSeed.trim().length > 0
+            ? configuredSeed.trim()
+            : null;
+        const tiles = this.activeRunSeed
+            ? generateBoard({ seed: this.activeRunSeed })
+            : generateBoard();
         this.tileLetterColors.clear();
         this.boardState = { tiles, selectedPath: [] };
         this.roundState = createRoundState();
@@ -1402,7 +1409,9 @@ export class GameScene extends Phaser.Scene {
         const result = submitWord(this.roundState, this.boardState.selectedPath);
 
         if (result.accepted) {
-            const expansion = applyEdgeExpansions(this.boardState.tiles, submittedPath);
+            const expansion = this.activeRunSeed
+                ? applyEdgeExpansions(this.boardState.tiles, submittedPath, { seed: this.activeRunSeed })
+                : applyEdgeExpansions(this.boardState.tiles, submittedPath);
             const scoredResult = this.applyExpansionScore(result, expansion.expandedEdges.length);
             const timeBonus = applyExpansionTimeBonus(this.roundState, expansion.expandedEdges.length);
             this.rebuildBoard();

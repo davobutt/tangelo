@@ -7,6 +7,7 @@ import {
     getNextTileIndex,
     type BoardBounds,
 } from './boardGeometry';
+import { getSeededLetter } from './seededGeneration';
 
 const LETTERS_PER_EDGE = 4;
 const MAX_BOARD_DIMENSION = 10;
@@ -15,6 +16,7 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 interface ExpansionOptions {
     lettersPerEdge?: number;
     letterGenerator?: () => string;
+    seed?: string;
 }
 
 interface AxisPlacement {
@@ -218,6 +220,7 @@ export function applyEdgeExpansions(
 
     const lettersPerEdge = options.lettersPerEdge ?? LETTERS_PER_EDGE;
     const letterGenerator = options.letterGenerator ?? randomLetter;
+    const seed = options.seed;
 
     const occupied = buildOccupiedSet(tiles);
     const bounds = getBoardBounds(tiles);
@@ -244,7 +247,9 @@ export function applyEdgeExpansions(
                 index: nextIndex,
                 row: cell.row,
                 col: cell.col,
-                letter: normalizeLetter(letterGenerator()),
+                letter: seed
+                    ? getSeededLetter(seed, cell.row, cell.col)
+                    : normalizeLetter(letterGenerator()),
             };
             nextIndex += 1;
             occupied.add(coordKey(cell.row, cell.col));

@@ -1,4 +1,5 @@
 import type { TileData } from '../models/Tile';
+import { getSeededLetter } from './seededGeneration';
 
 /**
  * Classic Boggle dice (16 dice, 6 faces each).
@@ -23,6 +24,10 @@ const BOGGLE_DICE: string[][] = [
     ['D', 'E', 'I', 'L', 'R', 'X'],
 ];
 
+export interface BoardGenerationOptions {
+    seed?: string;
+}
+
 function randomInt(max: number): number {
     return Math.floor(Math.random() * max);
 }
@@ -39,10 +44,24 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 /**
- * Generates a randomized 4×4 board using classic Boggle dice.
- * Returns exactly 16 TileData objects in row-major order.
+ * Generates a 4×4 board in row-major order.
+ * Unseeded boards use classic Boggle dice; seeded boards use coordinate-based letters.
  */
-export function generateBoard(): TileData[] {
+export function generateBoard(options: BoardGenerationOptions = {}): TileData[] {
+    const seed = options.seed;
+    if (seed) {
+        return Array.from({ length: 16 }, (_, position) => {
+            const row = Math.floor(position / 4);
+            const col = position % 4;
+            return {
+                index: position,
+                row,
+                col,
+                letter: getSeededLetter(seed, row, col),
+            };
+        });
+    }
+
     const diceOrder = shuffle([...Array(16).keys()]); // permuted die indices
 
     return diceOrder.map((dieIndex, position) => {
