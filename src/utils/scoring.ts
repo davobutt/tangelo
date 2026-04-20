@@ -1,4 +1,4 @@
-export const EXPANSION_EDGE_BONUS_POINTS = 4;
+export const EXPANSION_EDGE_BONUS_MULTIPLIER = 2;
 
 export function scoreWord(word: string): number {
     const length = word.length;
@@ -26,9 +26,9 @@ export function scoreWord(word: string): number {
     return 11;
 }
 
-export function scoreExpansionBonus(expandedEdgeCount: number): number {
+export function scoreExpansionBonus(baseScore: number, expandedEdgeCount: number): number {
     if (expandedEdgeCount < 1) return 0;
-    return expandedEdgeCount * EXPANSION_EDGE_BONUS_POINTS;
+    return baseScore * EXPANSION_EDGE_BONUS_MULTIPLIER * expandedEdgeCount;
 }
 
 export function scoreSubmission(baseScore: number, expandedEdgeCount: number): {
@@ -36,7 +36,7 @@ export function scoreSubmission(baseScore: number, expandedEdgeCount: number): {
     expansionBonus: number;
     totalScore: number;
 } {
-    const expansionBonus = scoreExpansionBonus(expandedEdgeCount);
+    const expansionBonus = scoreExpansionBonus(baseScore, expandedEdgeCount);
     return {
         baseScore,
         expansionBonus,
