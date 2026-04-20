@@ -3,10 +3,13 @@ import type { TileData } from '../models/Tile';
 import {
     buildOccupiedSet,
     coordKey,
+    getBoardBounds,
     getNextTileIndex,
+    type BoardBounds,
 } from './boardGeometry';
 
 const LETTERS_PER_EDGE = 4;
+const MAX_BOARD_DIMENSION = 10;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 interface ExpansionOptions {
@@ -44,6 +47,29 @@ function edgeAxisValue(tile: TileData, edge: BoardEdge): number {
 
 function axisCornerDistance(axis: number, axisMin: number, axisMax: number): number {
     return Math.min(Math.abs(axis - axisMin), Math.abs(axisMax - axis));
+}
+
+function boardSpan(min: number, max: number): number {
+    return max - min + 1;
+}
+
+function canPlaceWithinBoardCap(cell: AxisPlacement, bounds: BoardBounds): boolean {
+    const nextMinRow = Math.min(bounds.minRow, cell.row);
+    const nextMaxRow = Math.max(bounds.maxRow, cell.row);
+    const nextMinCol = Math.min(bounds.minCol, cell.col);
+    const nextMaxCol = Math.max(bounds.maxCol, cell.col);
+
+    return (
+        boardSpan(nextMinRow, nextMaxRow) <= MAX_BOARD_DIMENSION &&
+        boardSpan(nextMinCol, nextMaxCol) <= MAX_BOARD_DIMENSION
+    );
+}
+
+function extendBounds(bounds: BoardBounds, row: number, col: number): void {
+    bounds.minRow = Math.min(bounds.minRow, row);
+    bounds.maxRow = Math.max(bounds.maxRow, row);
+    bounds.minCol = Math.min(bounds.minCol, col);
+    bounds.maxCol = Math.max(bounds.maxCol, col);
 }
 
 function buildFrontierEdgeCells(
@@ -97,8 +123,10 @@ function planEdgePlacements(
     allTiles: TileData[],
     occupied: Set<string>,
     lettersPerEdge: number,
+    bounds: BoardBounds,
 ): AxisPlacement[] {
-    const edgeCells = buildFrontierEdgeCells(edge, allTiles, occupied);
+    const edgeCells = buildFrontierEdgeCells(edge, allTiles, occupied)
+        .filter((cell) => canPlaceWithinBoardCap(cell, bounds));
     if (edgeCells.length === 0) return [];
 
     const axisCenter =
@@ -192,6 +220,7 @@ export function applyEdgeExpansions(
     const letterGenerator = options.letterGenerator ?? randomLetter;
 
     const occupied = buildOccupiedSet(tiles);
+    const bounds = getBoardBounds(tiles);
     const qualifiedEdges = getQualifiedEdges(path, tiles);
     const expandedEdges: BoardEdge[] = [];
     const placements: ExpansionResult['placements'] = [];
@@ -200,13 +229,17 @@ export function applyEdgeExpansions(
 
     for (const edge of qualifiedEdges) {
         const edgeTiles = path.filter((tile) => isFrontierTile(tile, edge, occupied));
-        const planned = planEdgePlacements(edge, edgeTiles, tiles, occupied, lettersPerEdge);
+        const planned = planEdgePlacements(edge, edgeTiles, tiles, occupied, lettersPerEdge, bounds);
 
         if (planned.length > 0) {
             expandedEdges.push(edge);
         }
 
         for (const cell of planned) {
+            if (!canPlaceWithinBoardCap(cell, bounds)) {
+                continue;
+            }
+
             const tile: TileData = {
                 index: nextIndex,
                 row: cell.row,
@@ -216,6 +249,7 @@ export function applyEdgeExpansions(
             nextIndex += 1;
             occupied.add(coordKey(cell.row, cell.col));
             tiles.push(tile);
+            extendBounds(bounds, cell.row, cell.col);
             placements.push({ edge, tile });
         }
     }
