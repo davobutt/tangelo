@@ -272,7 +272,7 @@ export class GameScene extends Phaser.Scene {
             .text(
                 GAME_W / 2,
                 GAME_H / 2 - 34,
-                'Find words. Grow the board.\nBeat your high score.',
+                'Find words. Grow the board.\nEach expanded edge adds 2x word score.',
                 {
                     ...uiTextStyles.body(),
                     align: 'center',
@@ -1214,6 +1214,31 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    private showTimerBonus(seconds: number): void {
+        if (seconds <= 0) {
+            return;
+        }
+
+        const bonusText = this.add
+            .text(GAME_W / 2 + 42, 58, `+${seconds}s`, {
+                ...uiTextStyles.metric(),
+                color: themeColorHex(UI_THEME.palette.accentAlt),
+            })
+            .setOrigin(0, 0.5)
+            .setAlpha(0);
+
+        this.tweens.add({
+            targets: bonusText,
+            alpha: 1,
+            y: 44,
+            duration: 180,
+            ease: 'Sine.easeOut',
+            yoyo: true,
+            hold: 420,
+            onComplete: () => bonusText.destroy(),
+        });
+    }
+
     private applyExpansionScore(
         result: AcceptedSubmissionResult,
         expandedEdgeCount: number,
@@ -1414,6 +1439,7 @@ export class GameScene extends Phaser.Scene {
                 : applyEdgeExpansions(this.boardState.tiles, submittedPath);
             const scoredResult = this.applyExpansionScore(result, expansion.expandedEdges.length);
             const timeBonus = applyExpansionTimeBonus(this.roundState, expansion.expandedEdges.length);
+            this.showTimerBonus(timeBonus);
             this.rebuildBoard();
             this.animateGrowthPlacements(expansion.placements.map((placement) => placement.tile));
 
@@ -1422,9 +1448,8 @@ export class GameScene extends Phaser.Scene {
             }
 
             if (expansion.placements.length > 0) {
-                const edges = expansion.expandedEdges.join(', ').toUpperCase();
                 this.showFeedback(
-                    `✓ ${scoredResult.word} (+${scoredResult.score}: ${scoredResult.baseScore}+${scoredResult.expansionBonus}) | +${expansion.placements.length} (${edges}) | +${timeBonus}s`,
+                    `✓ ${scoredResult.word} (+${scoredResult.score}: ${scoredResult.baseScore}+${scoredResult.expansionBonus})`,
                     UI_THEME.palette.success,
                 );
             } else {
