@@ -31,7 +31,10 @@ function tryGetLocalStorage(): Storage | null {
     }
 }
 
-export function createHighScoreStore(storage: Storage | null = tryGetLocalStorage()): HighScoreStore {
+export function createHighScoreStore(
+    storage: Storage | null = tryGetLocalStorage(),
+    key: string = HIGH_SCORE_KEY,
+): HighScoreStore {
     let inMemoryScore = 0;
 
     if (!storage) {
@@ -49,21 +52,21 @@ export function createHighScoreStore(storage: Storage | null = tryGetLocalStorag
     return {
         get: () => {
             try {
-                const raw = storage.getItem(HIGH_SCORE_KEY);
+                const raw = storage.getItem(key);
                 if (raw !== null) {
                     const score = toScore(raw);
                     inMemoryScore = Math.max(inMemoryScore, score);
                     return inMemoryScore;
                 }
 
-                const legacyRaw = storage.getItem(LEGACY_HIGH_SCORE_KEY);
+                const legacyRaw = key === HIGH_SCORE_KEY ? storage.getItem(LEGACY_HIGH_SCORE_KEY) : null;
                 if (legacyRaw === null) {
                     return inMemoryScore;
                 }
 
                 const score = toScore(legacyRaw);
                 inMemoryScore = Math.max(inMemoryScore, score);
-                storage.setItem(HIGH_SCORE_KEY, String(inMemoryScore));
+                storage.setItem(key, String(inMemoryScore));
                 return inMemoryScore;
             } catch {
                 return inMemoryScore;
@@ -74,7 +77,7 @@ export function createHighScoreStore(storage: Storage | null = tryGetLocalStorag
             inMemoryScore = normalized;
 
             try {
-                storage.setItem(HIGH_SCORE_KEY, String(normalized));
+                storage.setItem(key, String(normalized));
             } catch {
                 // Ignore storage errors; in-memory fallback still works.
             }
@@ -83,8 +86,10 @@ export function createHighScoreStore(storage: Storage | null = tryGetLocalStorag
             inMemoryScore = 0;
 
             try {
-                storage.removeItem(HIGH_SCORE_KEY);
-                storage.removeItem(LEGACY_HIGH_SCORE_KEY);
+                storage.removeItem(key);
+                if (key === HIGH_SCORE_KEY) {
+                    storage.removeItem(LEGACY_HIGH_SCORE_KEY);
+                }
             } catch {
                 // Ignore storage errors; in-memory fallback still works.
             }

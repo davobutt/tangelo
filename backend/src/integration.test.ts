@@ -14,13 +14,13 @@ function testDatastoreOperations(): void {
 
     // Test 1: Submit a valid score
     console.log('  ✓ Test 1: Submitting valid score');
-    const entry1 = datastore.submitScore('player-1', 'Alice', 1450);
+    const entry1 = datastore.submitScore('player-1', 'Alice', 1450, { runMode: 'normal' });
     console.log(`    Entry stored: id=${entry1.id}, score=${entry1.score}`);
 
     // Test 2: Duplicate display names across different GUIDs should be independent
     console.log('  ✓ Test 2: Duplicate display names are independent by GUID');
-    const duplicateA = datastore.submitScore('player-2', 'Alex', 1200);
-    const duplicateB = datastore.submitScore('player-3', 'Alex', 1900);
+    const duplicateA = datastore.submitScore('player-2', 'Alex', 1200, { runMode: 'normal' });
+    const duplicateB = datastore.submitScore('player-3', 'Alex', 1900, { runMode: 'normal' });
     if (duplicateA.playerGUID === duplicateB.playerGUID) {
         throw new Error('Different players should not share GUID');
     }
@@ -28,8 +28,8 @@ function testDatastoreOperations(): void {
 
     // Test 3: Repeated submission from same GUID keeps best score only
     console.log('  ✓ Test 3: Repeated submissions merge by GUID using best score');
-    datastore.submitScore('player-1', 'Alice', 1100); // Lower score should not replace best
-    const merged = datastore.submitScore('player-1', 'Alice', 1650); // Higher score should replace
+    datastore.submitScore('player-1', 'Alice', 1100, { runMode: 'normal' }); // Lower score should not replace best
+    const merged = datastore.submitScore('player-1', 'Alice', 1650, { runMode: 'normal' }); // Higher score should replace
     if (merged.score !== 1650) {
         throw new Error(`Expected best score 1650 for player-1, got ${merged.score}`);
     }
@@ -37,7 +37,7 @@ function testDatastoreOperations(): void {
 
     // Test 4: Rename player and verify GUID association remains intact
     console.log('  ✓ Test 4: Renaming keeps GUID score association');
-    const renamed = datastore.submitScore('player-1', 'Alice Renamed', 1500); // Lower than best; name changes
+    const renamed = datastore.submitScore('player-1', 'Alice Renamed', 1500, { runMode: 'normal' }); // Lower than best; name changes
     if (renamed.playerGUID !== 'player-1') {
         throw new Error('GUID association should remain stable after rename');
     }
@@ -51,7 +51,7 @@ function testDatastoreOperations(): void {
 
     // Test 5: Fetch leaderboard - sorted by score desc and merged by GUID
     console.log('  ✓ Test 5: Fetching leaderboard (sorted by score desc, merged by GUID)');
-    const leaderboard = datastore.getLeaderboard(100);
+    const leaderboard = datastore.getLeaderboard(100, { runMode: 'normal' });
     console.log(`    Leaderboard has ${leaderboard.length} entries`);
     leaderboard.forEach((entry, idx) => {
         console.log(`    #${idx + 1}: ${entry.displayName} - ${entry.score} points`);
@@ -70,12 +70,38 @@ function testDatastoreOperations(): void {
 
     // Test 6: Fetch with limit
     console.log('  ✓ Test 6: Fetching leaderboard with limit=2');
-    const limited = datastore.getLeaderboard(2);
+    const limited = datastore.getLeaderboard(2, { runMode: 'normal' });
     console.log(`    Limited leaderboard: ${limited.length} entries`);
 
     if (limited.length !== 2) {
         throw new Error(`Expected 2 entries, got ${limited.length}`);
     }
+
+    // Test 7: Seeded challenge scores are tracked separately by seed
+    console.log('  ✓ Test 7: Seeded challenge scores are separated by seed');
+    datastore.submitScore('player-1', 'Alice Renamed', 900, { runMode: 'seeded', seedKey: 'family-night' });
+    datastore.submitScore('player-2', 'Alex', 1250, { runMode: 'seeded', seedKey: 'family-night' });
+    datastore.submitScore('player-3', 'Alex', 1500, { runMode: 'seeded', seedKey: 'daily-2026-04-20' });
+
+    const familySeedLeaderboard = datastore.getLeaderboard(10, { runMode: 'seeded', seedKey: 'family-night' });
+    const dailySeedLeaderboard = datastore.getLeaderboard(10, { runMode: 'seeded', seedKey: 'daily-2026-04-20' });
+
+    if (familySeedLeaderboard.length !== 2) {
+        throw new Error(`Expected 2 entries for family-night seeded leaderboard, got ${familySeedLeaderboard.length}`);
+    }
+    if (dailySeedLeaderboard.length !== 1) {
+        throw new Error(`Expected 1 entry for daily seeded leaderboard, got ${dailySeedLeaderboard.length}`);
+    }
+    if (familySeedLeaderboard.some((entry) => entry.seedKey !== 'family-night')) {
+        throw new Error('Family seeded leaderboard should only contain family-night scores');
+    }
+    if (dailySeedLeaderboard[0]?.seedKey !== 'daily-2026-04-20') {
+        throw new Error('Daily seeded leaderboard should only contain daily seed scores');
+    }
+    if (leaderboard.some((entry) => entry.runMode !== 'normal')) {
+        throw new Error('Normal leaderboard should not include seeded entries');
+    }
+    console.log('    Seeded challenge categories are isolated correctly');
 
     datastore.close();
     console.log('  ✅ All datastore tests passed!\n');
@@ -90,6 +116,7 @@ function testValidation(): void {
         playerGUID: '550e8400-e29b-41d4-a716-446655440000',
         displayName: 'Alice',
         score: 1450,
+        runMode: 'normal',
     };
     if (!validateScoreSubmission(valid)) {
         throw new Error('Valid payload failed validation');
@@ -110,6 +137,7 @@ function testValidation(): void {
         playerGUID: '550e8400-e29b-41d4-a716-446655440000',
         displayName: '',
         score: 1450,
+        runMode: 'normal',
     };
     if (validateScoreSubmission(emptyName)) {
         throw new Error('Should reject empty displayName');
@@ -122,6 +150,7 @@ function testValidation(): void {
         playerGUID: '550e8400-e29b-41d4-a716-446655440000',
         displayName: 'Alice',
         score: -100,
+        runMode: 'normal',
     };
     if (validateScoreSubmission(negScore)) {
         throw new Error('Should reject negative score');
@@ -134,6 +163,7 @@ function testValidation(): void {
         playerGUID: '550e8400-e29b-41d4-a716-446655440000',
         displayName: 'Alice',
         score: 2000000,
+        runMode: 'normal',
     };
     if (validateScoreSubmission(highScore)) {
         throw new Error('Should reject score > 1,000,000');
@@ -146,11 +176,39 @@ function testValidation(): void {
         playerGUID: '550e8400-e29b-41d4-a716-446655440000',
         displayName: 'Alice',
         score: 145.5,
+        runMode: 'normal',
     };
     if (validateScoreSubmission(floatScore)) {
         throw new Error('Should reject non-integer score');
     }
     console.log('    Correctly rejected');
+
+    // Test 7: Seeded run requires seedKey
+    console.log('  ✓ Test 7: Seeded payload requires seedKey');
+    const missingSeed = {
+        playerGUID: '550e8400-e29b-41d4-a716-446655440000',
+        displayName: 'Alice',
+        score: 1450,
+        runMode: 'seeded',
+    };
+    if (validateScoreSubmission(missingSeed)) {
+        throw new Error('Should reject seeded payload without seedKey');
+    }
+    console.log('    Correctly rejected');
+
+    // Test 8: Seeded payload accepts seedKey
+    console.log('  ✓ Test 8: Seeded payload accepts seedKey');
+    const seededValid = {
+        playerGUID: '550e8400-e29b-41d4-a716-446655440000',
+        displayName: 'Alice',
+        score: 1450,
+        runMode: 'seeded',
+        seedKey: 'family-night',
+    };
+    if (!validateScoreSubmission(seededValid)) {
+        throw new Error('Valid seeded payload failed validation');
+    }
+    console.log('    Valid seeded payload accepted');
 
     console.log('  ✅ All validation tests passed!\n');
 }

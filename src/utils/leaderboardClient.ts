@@ -1,7 +1,11 @@
+import type { RunMode } from './runContext';
+
 export interface SubmitScorePayload {
     playerGUID: string;
     displayName: string;
     score: number;
+    runMode: RunMode;
+    seedKey?: string;
 }
 
 export interface LeaderboardEntry {
@@ -10,6 +14,8 @@ export interface LeaderboardEntry {
     displayName: string;
     score: number;
     submittedAt: number;
+    runMode: RunMode;
+    seedKey: string | null;
 }
 
 export interface LeaderboardResponse {
@@ -29,6 +35,11 @@ export interface FetchLeaderboardResult {
     entries: LeaderboardEntry[];
     status?: number;
     error?: string;
+}
+
+export interface FetchLeaderboardOptions {
+    runMode?: RunMode;
+    seedKey?: string;
 }
 
 const DEFAULT_API_BASE = '';
@@ -74,9 +85,20 @@ export async function submitLeaderboardScore(payload: SubmitScorePayload): Promi
     }
 }
 
-export async function fetchLeaderboard(limit: number = 25): Promise<FetchLeaderboardResult> {
+export async function fetchLeaderboard(
+    limit: number = 25,
+    options: FetchLeaderboardOptions = {},
+): Promise<FetchLeaderboardResult> {
     try {
-        const response = await fetch(`${resolveApiBase()}/api/leaderboard?limit=${limit}`);
+        const params = new URLSearchParams({ limit: String(limit) });
+        if (options.runMode) {
+            params.set('runMode', options.runMode);
+        }
+        if (options.seedKey) {
+            params.set('seedKey', options.seedKey);
+        }
+
+        const response = await fetch(`${resolveApiBase()}/api/leaderboard?${params.toString()}`);
 
         if (!response.ok) {
             let message = `HTTP ${response.status}`;

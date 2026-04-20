@@ -38,8 +38,8 @@ backend/
 
 ## Features
 
-✅ **Score Submission**: POST endpoint for GUID-keyed score submission with validation
-✅ **Leaderboard Ranking**: GET endpoint for fetching top scores sorted by rank
+✅ **Score Submission**: POST endpoint for GUID-keyed score submission with normal or seeded challenge context
+✅ **Leaderboard Ranking**: GET endpoint for fetching top scores for normal play or a specific seeded challenge
 ✅ **Persistent Storage**: SQLite database with indexing for efficient queries
 ✅ **GUID Merge Rules**: One leaderboard record per GUID with best-score merge behavior
 ✅ **Mutable Display Name**: Display names can change without breaking score identity
@@ -74,15 +74,29 @@ Content-Type: application/json
 {
   "playerGUID": "uuid-here",
   "displayName": "Player Name",
-  "score": 1450
+  "score": 1450,
+  "runMode": "normal"
+}
+```
+
+Seeded challenge submissions use:
+
+```json
+{
+  "playerGUID": "uuid-here",
+  "displayName": "Player Name",
+  "score": 1450,
+  "runMode": "seeded",
+  "seedKey": "family-night"
 }
 ```
 
 ### Fetch Leaderboard
 ```
 GET /api/leaderboard?limit=100
+GET /api/leaderboard?limit=100&runMode=seeded&seedKey=family-night
 ```
-Returns top-ranked entries sorted by score descending.
+Returns top-ranked entries sorted by score descending within the requested run category.
 
 See [API_CONTRACT.md](API_CONTRACT.md) for detailed endpoint documentation.
 
@@ -94,6 +108,8 @@ Each leaderboard entry contains:
 - `displayName`: Human-readable player name
 - `score`: Score value (0–1,000,000)
 - `submittedAt`: Submission timestamp
+- `runMode`: `normal` or `seeded`
+- `seedKey`: seeded challenge identifier, or `null` for normal runs
 
 ## Datastore
 

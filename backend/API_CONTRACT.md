@@ -39,7 +39,8 @@ Content-Type: application/json
 {
   "playerGUID": "550e8400-e29b-41d4-a716-446655440000",
   "displayName": "Alice",
-  "score": 1450
+  "score": 1450,
+  "runMode": "normal"
 }
 ```
 
@@ -47,11 +48,13 @@ Content-Type: application/json
 - `playerGUID`: Required, non-empty string, max 256 chars (UUID recommended)
 - `displayName`: Required, non-empty string, max 128 chars
 - `score`: Required, integer 0–1,000,000
+- `runMode`: Optional, `normal` or `seeded` (defaults to `normal`)
+- `seedKey`: Required when `runMode` is `seeded`
 
 **Merge Rules**:
-- Identity is keyed by `playerGUID` (not display name)
+- Identity is keyed by `playerGUID` within a score category
 - Duplicate display names are allowed across different GUIDs
-- Re-submissions from the same GUID keep the best score (`max(existing, submitted)`)
+- Re-submissions from the same GUID keep the best score (`max(existing, submitted)`) within that category
 - `displayName` is mutable metadata and is always refreshed to the latest submitted name
 - `submittedAt` updates only when a new best score is achieved
 
@@ -64,7 +67,9 @@ Content-Type: application/json
     "playerGUID": "550e8400-e29b-41d4-a716-446655440000",
     "displayName": "Alice",
     "score": 1450,
-    "submittedAt": 1713398400000
+    "submittedAt": 1713398400000,
+    "runMode": "normal",
+    "seedKey": null
   },
   "timestamp": 1713398400000
 }
@@ -75,7 +80,7 @@ Content-Type: application/json
 {
   "status": 400,
   "code": "INVALID_PAYLOAD",
-  "message": "Invalid score submission: playerGUID, displayName, and score (0-1000000) are required",
+  "message": "Invalid score submission: playerGUID, displayName, score, and seeded context (when used) are required",
   "timestamp": 1713398400000
 }
 ```
@@ -97,10 +102,13 @@ Retrieve ranked entries sorted by score descending, then by submission time asce
 
 ```
 GET /api/leaderboard?limit=100
+GET /api/leaderboard?limit=100&runMode=seeded&seedKey=family-night
 ```
 
 **Query Parameters**:
 - `limit` (optional): Number of entries to return. Default: 100, Max: 1000
+- `runMode` (optional): `normal` or `seeded`. Default: `normal`
+- `seedKey` (required when `runMode=seeded`): Seed identifier to compare within a seeded challenge
 
 **Response** (200 OK):
 ```json
@@ -111,14 +119,18 @@ GET /api/leaderboard?limit=100
       "playerGUID": "550e8400-e29b-41d4-a716-446655440000",
       "displayName": "Alice",
       "score": 2100,
-      "submittedAt": 1713398400000
+      "submittedAt": 1713398400000,
+      "runMode": "normal",
+      "seedKey": null
     },
     {
       "id": "550e8400-e29b-41d4-a716-446655440002",
       "playerGUID": "550e8400-e29b-41d4-a716-446655440099",
       "displayName": "Bob",
       "score": 1950,
-      "submittedAt": 1713398401000
+      "submittedAt": 1713398401000,
+      "runMode": "normal",
+      "seedKey": null
     }
   ],
   "totalCount": 2,
@@ -148,10 +160,12 @@ GET /api/leaderboard?limit=100
   displayName: string;      // Human-readable player name
   score: number;            // Score value (0-1,000,000)
   submittedAt: number;      // Submission timestamp (milliseconds since epoch)
+  runMode: 'normal' | 'seeded';
+  seedKey: string | null;
 }
 ```
 
-The backend stores one active leaderboard record per `playerGUID`. Display names are mutable and may change over time without affecting score identity.
+The backend stores one active leaderboard record per `playerGUID` per score category. Display names are mutable and may change over time without affecting score identity.
 
 ## Error Codes
 
@@ -233,6 +247,8 @@ interface LeaderboardEntry {
   displayName: string;
   score: number;
   submittedAt: number;
+  runMode: 'normal' | 'seeded';
+  seedKey: string | null;
 }
 
 interface LeaderboardResponse {
@@ -252,13 +268,15 @@ interface ScoreSubmissionPayload {
   playerGUID: string;
   displayName: string;
   score: number;
+  runMode?: 'normal' | 'seeded';
+  seedKey?: string;
 }
 ```
 
 ### Example Fetch
 ```typescript
 // Fetch leaderboard
-const response = await fetch('http://localhost:3000/api/leaderboard?limit=50', {
+const response = await fetch('http://localhost:3000/api/leaderboard?limit=50&runMode=seeded&seedKey=family-night', {
   method: 'GET',
   headers: { 'Content-Type': 'application/json' },
 });
@@ -273,6 +291,8 @@ const response = await fetch('http://localhost:3000/api/scores', {
     playerGUID: 'player-uuid-here',
     displayName: 'Alice',
     score: 1450,
+    runMode: 'seeded',
+    seedKey: 'family-night',
   }),
 });
 const result = await response.json();

@@ -24,6 +24,7 @@ import {
     submitLeaderboardScore,
     type LeaderboardEntry,
 } from '../utils/leaderboardClient';
+import { resolveRunContext, type RunContext } from '../utils/runContext';
 import {
     loadPlayerProfile,
     savePlayerProfile,
@@ -141,6 +142,7 @@ export class GameScene extends Phaser.Scene {
     private highScoreStore: HighScoreStore = createHighScoreStore();
     private highScore = 0;
     private activeRunSeed: string | null = null;
+    private activeRunContext: RunContext = resolveRunContext();
     private tileLetterColors = new Map<number, number>();
     private boardMinRow = 0;
     private boardMinCol = 0;
@@ -168,6 +170,12 @@ export class GameScene extends Phaser.Scene {
 
         this.pathGraphics = this.add.graphics();
 
+        this.activeRunContext = resolveRunContext({
+            manualSeed: this.registry.get('runSeed'),
+            sharedSeed: import.meta.env.VITE_SHARED_DAILY_SEED,
+        });
+        this.activeRunSeed = this.activeRunContext.seedKey;
+        this.highScoreStore = createHighScoreStore(undefined, this.activeRunContext.highScoreStorageKey);
         this.highScore = this.highScoreStore.get();
 
         this.buildHUD();
@@ -190,10 +198,13 @@ export class GameScene extends Phaser.Scene {
         this.clearBoardObjects();
 
         // Fresh state
-        const configuredSeed = this.registry.get('runSeed');
-        this.activeRunSeed = typeof configuredSeed === 'string' && configuredSeed.trim().length > 0
-            ? configuredSeed.trim()
-            : null;
+        this.activeRunContext = resolveRunContext({
+            manualSeed: this.registry.get('runSeed'),
+            sharedSeed: import.meta.env.VITE_SHARED_DAILY_SEED,
+        });
+        this.activeRunSeed = this.activeRunContext.seedKey;
+        this.highScoreStore = createHighScoreStore(undefined, this.activeRunContext.highScoreStorageKey);
+        this.highScore = this.highScoreStore.get();
         const tiles = this.activeRunSeed
             ? generateBoard({ seed: this.activeRunSeed })
             : generateBoard();
@@ -607,11 +618,15 @@ export class GameScene extends Phaser.Scene {
             return;
         }
 
-        void submitLeaderboardScore({
+        const payload = {
             playerGUID: this.playerProfile.guid,
             displayName: this.playerProfile.displayName,
             score,
-        }).then((result) => {
+            runMode: this.activeRunContext.mode,
+            ...(this.activeRunContext.seedKey ? { seedKey: this.activeRunContext.seedKey } : {}),
+        } as const;
+
+        void submitLeaderboardScore(payload).then((result) => {
             if (result.ok) {
                 return;
             }
@@ -811,7 +826,9 @@ export class GameScene extends Phaser.Scene {
         this.leaderboardStatusText.setColor(themeColorHex(UI_THEME.palette.textMuted));
         this.leaderboardEntriesText.setText('');
 
-        const response = await fetchLeaderboard(20);
+        const response = await fetchLeaderboard(20, this.activeRunContext.seedKey
+            ? { runMode: this.activeRunContext.mode, seedKey: this.activeRunContext.seedKey }
+            : { runMode: this.activeRunContext.mode });
         if (!this.leaderboardStatusText || !this.leaderboardEntriesText) {
             return;
         }
@@ -830,7 +847,7 @@ export class GameScene extends Phaser.Scene {
             return;
         }
 
-        this.leaderboardStatusText.setText('Top players (global)');
+        this.leaderboardStatusText.setText(this.activeRunContext.leaderboardLabel);
         this.leaderboardStatusText.setColor(themeColorHex(UI_THEME.palette.success));
         this.leaderboardEntriesText.setText(this.formatLeaderboardEntries(response.entries));
     }

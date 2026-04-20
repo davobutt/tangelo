@@ -6,7 +6,20 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { IDatastore } from './datastore.js';
-import { validateScoreSubmission, ApiError, LeaderboardResponse } from './types.js';
+import { validateScoreSubmission, ApiError, LeaderboardResponse, type LeaderboardQuery } from './types.js';
+
+function parseLeaderboardQuery(req: Request): LeaderboardQuery {
+    const runMode = req.query.runMode === 'seeded' ? 'seeded' : 'normal';
+    const seedKey = runMode === 'seeded'
+        ? String(req.query.seedKey ?? '').trim() || null
+        : null;
+
+    if (runMode === 'seeded' && !seedKey) {
+        throw new Error('seedKey required for seeded leaderboard queries');
+    }
+
+    return { runMode, seedKey };
+}
 
 export function createApiRouter(datastore: IDatastore): Router {
     const router = Router();
@@ -24,7 +37,7 @@ export function createApiRouter(datastore: IDatastore): Router {
                 const error: ApiError = {
                     status: 400,
                     code: 'INVALID_PAYLOAD',
-                    message: 'Invalid score submission: playerGUID, displayName, and score (0-1000000) are required',
+                    message: 'Invalid score submission: playerGUID, displayName, score, and seeded context (when used) are required',
                     timestamp: Date.now(),
                 };
                 return res.status(400).json(error);
@@ -34,9 +47,11 @@ export function createApiRouter(datastore: IDatastore): Router {
             const playerGUID = String(payload.playerGUID).trim();
             const displayName = String(payload.displayName).trim();
             const score = Math.floor(payload.score);
+            const runMode = payload.runMode === 'seeded' ? 'seeded' : 'normal';
+            const seedKey = runMode === 'seeded' ? String(payload.seedKey).trim() : null;
 
             // Submit to datastore
-            const entry = datastore.submitScore(playerGUID, displayName, score);
+            const entry = datastore.submitScore(playerGUID, displayName, score, { runMode, seedKey });
 
             res.status(201).json({
                 success: true,
@@ -71,8 +86,10 @@ export function createApiRouter(datastore: IDatastore): Router {
                 }
             }
 
+            const query = parseLeaderboardQuery(req);
+
             // Fetch leaderboard from datastore
-            const entries = datastore.getLeaderboard(limit);
+            const entries = datastore.getLeaderboard(limit, query);
 
             const response: LeaderboardResponse = {
                 entries,
@@ -82,6 +99,16 @@ export function createApiRouter(datastore: IDatastore): Router {
 
             res.status(200).json(response);
         } catch (error) {
+            if (error instanceof Error && error.message.includes('seedKey required')) {
+                const apiError: ApiError = {
+                    status: 400,
+                    code: 'INVALID_QUERY',
+                    message: error.message,
+                    timestamp: Date.now(),
+                };
+                res.status(400).json(apiError);
+                return;
+            }
             // Handle datastore read failures gracefully
             console.error('Error fetching leaderboard:', error);
             const apiError: ApiError = {
