@@ -1,9 +1,13 @@
 const HIGH_SCORE_KEY = 'tangelo.endless.highScore';
 const LEGACY_HIGH_SCORE_KEY = 'tangelo.highScore';
 
+export const HIGH_SCORE_STORAGE_KEY = HIGH_SCORE_KEY;
+export const LEGACY_HIGH_SCORE_STORAGE_KEY = LEGACY_HIGH_SCORE_KEY;
+
 export interface HighScoreStore {
     get(): number;
     set(score: number): void;
+    clear(): void;
 }
 
 function toScore(value: unknown): number {
@@ -35,6 +39,9 @@ export function createHighScoreStore(storage: Storage | null = tryGetLocalStorag
             get: () => inMemoryScore,
             set: (score: number) => {
                 inMemoryScore = Math.max(inMemoryScore, Math.max(0, Math.floor(score)));
+            },
+            clear: () => {
+                inMemoryScore = 0;
             },
         };
     }
@@ -68,6 +75,16 @@ export function createHighScoreStore(storage: Storage | null = tryGetLocalStorag
 
             try {
                 storage.setItem(HIGH_SCORE_KEY, String(normalized));
+            } catch {
+                // Ignore storage errors; in-memory fallback still works.
+            }
+        },
+        clear: () => {
+            inMemoryScore = 0;
+
+            try {
+                storage.removeItem(HIGH_SCORE_KEY);
+                storage.removeItem(LEGACY_HIGH_SCORE_KEY);
             } catch {
                 // Ignore storage errors; in-memory fallback still works.
             }

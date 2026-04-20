@@ -79,6 +79,20 @@ describe('createHighScoreStore', () => {
         expect(store.get()).toBe(7);
     });
 
+    it('clears local high score state and storage keys', () => {
+        const storage = new MemoryStorage();
+        const store = createHighScoreStore(storage);
+
+        store.set(21);
+        expect(store.get()).toBe(21);
+
+        store.clear();
+
+        expect(store.get()).toBe(0);
+        expect(storage.getItem('tangelo.endless.highScore')).toBeNull();
+        expect(storage.getItem('tangelo.highScore')).toBeNull();
+    });
+
     it('remains playable when storage throws', () => {
         const store = createHighScoreStore(new ThrowingStorage());
 

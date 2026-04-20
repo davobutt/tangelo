@@ -18,6 +18,21 @@ import { tickRoundTimer } from '../utils/endlessRunLifecycle';
 import { getBoardBounds } from '../utils/boardGeometry';
 import { calculateBoardLayout, type BoardLayout } from '../utils/boardLayout';
 import { scoreSubmission } from '../utils/scoring';
+import { UI_THEME, themeColorHex, uiTextStyles } from '../theme/uiTheme';
+import {
+    fetchLeaderboard,
+    submitLeaderboardScore,
+    type LeaderboardEntry,
+} from '../utils/leaderboardClient';
+import {
+    loadPlayerProfile,
+    savePlayerProfile,
+    createPlayerProfile,
+    clearPlayerProfile,
+    updatePlayerDisplayName,
+    validateDisplayName,
+    type PlayerProfile,
+} from '../utils/playerProfile';
 
 // ─── Layout constants ───────────────────────────────────────────────────────
 const GAME_W = 480;
@@ -35,16 +50,60 @@ const BOARD_VIEWPORT = {
 const INITIAL_BOARD_SIZE = 4 * BASE_TILE_SIZE + 3 * BASE_TILE_GAP;
 const HUD_BOTTOM_ANCHOR_Y = BOARD_VIEWPORT.y + INITIAL_BOARD_SIZE;
 
-const COLOR_BG = 0x1a1a2e;
-const COLOR_TILE_IDLE = 0x16213e;
-const COLOR_TILE_SELECTED = 0xe94560;
-const COLOR_TILE_HOVER = 0x0f3460;
-const COLOR_TEXT = 0xf5f5f5;
-const COLOR_TIMER_LOW = 0xe94560;
-const COLOR_ACCEPT = 0x4caf50;
-const COLOR_REJECT = 0xe94560;
-const WORD_HISTORY_LIMIT = 8;
-const GROWTH_FADE_IN_MS = 260;
+const WORD_HISTORY_LIMIT = UI_THEME.tuning.wordHistoryLimit;
+const GROWTH_FADE_IN_MS = UI_THEME.tuning.growthFadeInMs;
+const TILE_LETTER_COLORS = [
+    0xff6b6b,
+    0xf97316,
+    0xfacc15,
+    0x4ade80,
+    0x2dd4bf,
+    0x38bdf8,
+    0x818cf8,
+    0xe879f9,
+] as const;
+
+const HUD_LAYOUT = {
+    statusPanelY: 70,
+    statusPanelHeight: 86,
+    controlsPanelY: HUD_BOTTOM_ANCHOR_Y + 92,
+    controlsPanelHeight: 120,
+    wordsPanelHeight: 92,
+    panelInsetX: UI_THEME.spacing.lg,
+    restartButton: {
+        x: GAME_W - 54,
+        y: 30,
+        width: 84,
+        height: 28,
+        fontSize: 12,
+    },
+    leaderboardButton: {
+        x: 64,
+        y: 30,
+        width: 112,
+        height: 28,
+        fontSize: 12,
+    },
+    submitButton: {
+        width: 164,
+        height: 46,
+    },
+};
+
+type UIButton = {
+    container: Phaser.GameObjects.Container;
+    bg: Phaser.GameObjects.Rectangle;
+    label: Phaser.GameObjects.Text;
+    baseColor: number;
+    onClick: () => void;
+    enabled: boolean;
+};
+
+type OverlayTextInput = {
+    inputField: HTMLInputElement;
+    focus: () => void;
+    cleanup: () => void;
+};
 
 // ─── GameScene ───────────────────────────────────────────────────────────────
 
@@ -62,14 +121,26 @@ export class GameScene extends Phaser.Scene {
     private currentWordText!: Phaser.GameObjects.Text;
     private feedbackText!: Phaser.GameObjects.Text;
     private wordListText!: Phaser.GameObjects.Text;
-    private submitButton!: Phaser.GameObjects.Container;
-    private restartButton!: Phaser.GameObjects.Container;
+    private submitButton!: UIButton;
+    private restartButton!: UIButton;
+    private leaderboardButton!: UIButton;
+    private startOverlay: Phaser.GameObjects.Container | null = null;
+    private profileOverlay: Phaser.GameObjects.Container | null = null;
+    private leaderboardOverlay: Phaser.GameObjects.Container | null = null;
+    private settingsOverlay: Phaser.GameObjects.Container | null = null;
+    private leaderboardStatusText: Phaser.GameObjects.Text | null = null;
+    private leaderboardEntriesText: Phaser.GameObjects.Text | null = null;
+    private leaderboardProfileText: Phaser.GameObjects.Text | null = null;
+    private playerProfile!: PlayerProfile;
 
     // Timer tracking
     private timerEvent!: Phaser.Time.TimerEvent;
+    private roundHasStarted = false;
+    private expansionInputLockedUntil = 0;
 
     private highScoreStore: HighScoreStore = createHighScoreStore();
     private highScore = 0;
+    private tileLetterColors = new Map<number, number>();
     private boardMinRow = 0;
     private boardMinCol = 0;
     private boardLayout: BoardLayout = {
@@ -91,14 +162,23 @@ export class GameScene extends Phaser.Scene {
     // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
     create(): void {
-        this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, COLOR_BG);
+        this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, UI_THEME.palette.backdropDeep);
+        this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W - 24, GAME_H - 24, UI_THEME.palette.backdropMid, 0.45);
 
         this.pathGraphics = this.add.graphics();
 
         this.highScore = this.highScoreStore.get();
 
         this.buildHUD();
-        this.startRound();
+
+        // Check if player profile exists; if not, show profile gate first
+        const existingProfile = loadPlayerProfile();
+        if (existingProfile) {
+            this.playerProfile = existingProfile;
+            this.showStartGate();
+        } else {
+            this.showProfileGate();
+        }
     }
 
     // ─── Round management ──────────────────────────────────────────────────────
@@ -110,12 +190,19 @@ export class GameScene extends Phaser.Scene {
 
         // Fresh state
         const tiles = generateBoard();
+        this.tileLetterColors.clear();
         this.boardState = { tiles, selectedPath: [] };
         this.roundState = createRoundState();
+        this.roundHasStarted = true;
+        this.expansionInputLockedUntil = 0;
 
         this.rebuildBoard();
         this.updateHUD();
-        this.submitButton.setVisible(true);
+        this.feedbackText.setVisible(true);
+        this.feedbackText.setText('');
+        this.submitButton.container.setVisible(true);
+        this.setButtonEnabled(this.restartButton, true);
+        this.setButtonEnabled(this.leaderboardButton, true);
 
         // 60-second countdown
         this.timerEvent = this.time.addEvent({
@@ -126,6 +213,342 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
+    private showStartGate(): void {
+        this.timerEvent?.remove(false);
+        this.pathGraphics.clear();
+        this.clearBoardObjects();
+        this.roundHasStarted = false;
+
+        if (this.roundState) {
+            this.roundState.status = 'ended';
+            this.boardState.selectedPath = [];
+        }
+
+        this.timerText.setText(String(ROUND_DURATION_SECONDS));
+        this.timerText.setColor(themeColorHex(UI_THEME.palette.textStrong));
+        this.scoreText.setText('Score: 0');
+        this.currentWordText.setText('');
+        this.feedbackText.setText('');
+        this.feedbackText.setVisible(false);
+        this.wordListText.setText('—');
+        this.submitButton.container.setVisible(false);
+        this.setButtonEnabled(this.submitButton, false);
+        this.setButtonEnabled(this.restartButton, false);
+        this.setButtonEnabled(this.leaderboardButton, true);
+
+        this.startOverlay?.destroy(true);
+
+        const blocker = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W,
+            GAME_H,
+            UI_THEME.palette.backdropDeep,
+            0.72,
+        );
+
+        const panel = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2 - 20,
+            GAME_W - 72,
+            230,
+            UI_THEME.palette.surfaceBase,
+            0.95,
+        );
+
+        const heading = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 92, 'START ROUND', uiTextStyles.title())
+            .setOrigin(0.5)
+            .setScale(0.8);
+
+        const body = this.add
+            .text(
+                GAME_W / 2,
+                GAME_H / 2 - 34,
+                'Find words. Grow the board.\nBeat your high score.',
+                {
+                    ...uiTextStyles.body(),
+                    align: 'center',
+                    lineSpacing: 5,
+                },
+            )
+            .setOrigin(0.5);
+
+        const startButton = this.makeButton(
+            GAME_W / 2,
+            GAME_H / 2 + 42,
+            'START GAME',
+            () => this.enterRoundFromGate(),
+            UI_THEME.palette.accent,
+        );
+
+        this.startOverlay = this.add.container(0, 0, [blocker, panel, heading, body, startButton.container]);
+        this.startOverlay.setDepth(200);
+        this.startOverlay.setAlpha(0);
+
+        this.tweens.add({
+            targets: this.startOverlay,
+            alpha: 1,
+            duration: 220,
+            ease: 'Sine.easeOut',
+        });
+    }
+
+    private enterRoundFromGate(): void {
+        if (!this.startOverlay) {
+            this.startRound();
+            return;
+        }
+
+        const overlay = this.startOverlay;
+        this.startOverlay = null;
+
+        this.tweens.add({
+            targets: overlay,
+            alpha: 0,
+            duration: 200,
+            ease: 'Sine.easeInOut',
+            onComplete: () => {
+                overlay.destroy(true);
+                this.startRound();
+            },
+        });
+    }
+
+    private showProfileGate(): void {
+        this.profileOverlay?.destroy(true);
+        this.setButtonEnabled(this.leaderboardButton, false);
+
+        const blocker = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W,
+            GAME_H,
+            UI_THEME.palette.backdropDeep,
+            0.72,
+        );
+
+        const panel = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W - 72,
+            260,
+            UI_THEME.palette.surfaceBase,
+            0.95,
+        );
+
+        const heading = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 90, 'SET YOUR NAME', uiTextStyles.title())
+            .setOrigin(0.5)
+            .setScale(0.85);
+
+        const subtitle = this.add
+            .text(
+                GAME_W / 2,
+                GAME_H / 2 - 40,
+                'Enter your name to begin.\nMax 20 characters.',
+                {
+                    ...uiTextStyles.body(),
+                    align: 'center',
+                    lineSpacing: 3,
+                    fontSize: '14px',
+                },
+            )
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+
+        const errorText = this.add
+            .text(GAME_W / 2, GAME_H / 2 + 12, '', {
+                ...uiTextStyles.body(),
+                fontSize: '12px',
+                align: 'center',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.danger));
+
+        const inputBox = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2 + 50,
+            GAME_W - 120,
+            44,
+            UI_THEME.palette.surfaceMuted,
+            0.6,
+        );
+        inputBox.setStrokeStyle(1, UI_THEME.palette.borderSoft, 0.5);
+
+        const inputText = this.add
+            .text(GAME_W / 2, GAME_H / 2 + 50, '', {
+                ...uiTextStyles.body(),
+                fontSize: '18px',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textStrong));
+
+        const { inputField, focus, cleanup } = this.createOverlayTextInput({
+            centerX: GAME_W / 2,
+            centerY: GAME_H / 2 + 50,
+            width: GAME_W - 120,
+            height: 44,
+            placeholder: 'Your name...',
+            onInput: (value) => {
+                inputText.setText(value);
+                errorText.setText('');
+            },
+            onEnter: () => this.handleProfileSubmit(inputField.value.trim(), errorText, inputText),
+        });
+
+        const submitButton = this.makeButton(
+            GAME_W / 2,
+            GAME_H / 2 + 130,
+            'CONTINUE',
+            () => this.handleProfileSubmit(inputField.value.trim(), errorText, inputText),
+            UI_THEME.palette.accent,
+        );
+
+        this.profileOverlay = this.add.container(0, 0, [
+            blocker,
+            panel,
+            heading,
+            subtitle,
+            errorText,
+            inputBox,
+            inputText,
+            submitButton.container,
+        ]);
+        this.profileOverlay.setDepth(200);
+        this.profileOverlay.setAlpha(0);
+        this.profileOverlay.once('destroy', cleanup);
+
+        this.tweens.add({
+            targets: this.profileOverlay,
+            alpha: 1,
+            duration: 220,
+            ease: 'Sine.easeOut',
+        });
+
+        window.requestAnimationFrame(focus);
+    }
+
+    private handleProfileSubmit(
+        name: string,
+        errorText: Phaser.GameObjects.Text,
+        inputText: Phaser.GameObjects.Text,
+    ): void {
+        const error = validateDisplayName(name);
+        if (error) {
+            errorText.setText(error);
+            return;
+        }
+
+        // Create and save profile
+        this.playerProfile = createPlayerProfile(name);
+        savePlayerProfile(this.playerProfile);
+
+        // Fade out profile overlay and show start gate
+        const overlay = this.profileOverlay;
+        this.profileOverlay = null;
+
+        if (overlay) {
+            this.tweens.add({
+                targets: overlay,
+                alpha: 0,
+                duration: 200,
+                ease: 'Sine.easeInOut',
+                onComplete: () => {
+                    overlay.destroy(true);
+                    this.showStartGate();
+                },
+            });
+        } else {
+            this.showStartGate();
+        }
+    }
+
+    private createOverlayTextInput(options: {
+        centerX: number;
+        centerY: number;
+        width: number;
+        height: number;
+        initialValue?: string;
+        placeholder?: string;
+        onInput: (value: string) => void;
+        onEnter: () => void;
+    }): OverlayTextInput {
+        const inputField = document.createElement('input');
+        inputField.type = 'text';
+        inputField.maxLength = 20;
+        inputField.value = options.initialValue ?? '';
+        inputField.placeholder = options.placeholder ?? '';
+        inputField.inputMode = 'text';
+        inputField.autocapitalize = 'words';
+        inputField.spellcheck = false;
+        inputField.setAttribute('aria-label', 'Display name');
+        inputField.setAttribute('autocomplete', 'nickname');
+        inputField.style.position = 'absolute';
+        inputField.style.zIndex = '1000';
+        inputField.style.margin = '0';
+        inputField.style.padding = '0 14px';
+        inputField.style.border = '0';
+        inputField.style.borderRadius = '10px';
+        inputField.style.background = 'transparent';
+        inputField.style.color = 'transparent';
+        inputField.style.caretColor = 'transparent';
+        inputField.style.outline = 'none';
+        inputField.style.opacity = '0.01';
+        inputField.style.fontSize = '16px';
+        inputField.style.pointerEvents = 'auto';
+
+        const updatePosition = () => {
+            const canvas = this.game.canvas;
+            if (!(canvas instanceof HTMLCanvasElement)) {
+                return;
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = rect.width / GAME_W;
+            const scaleY = rect.height / GAME_H;
+            inputField.style.left = `${window.scrollX + rect.left + (options.centerX - options.width / 2) * scaleX}px`;
+            inputField.style.top = `${window.scrollY + rect.top + (options.centerY - options.height / 2) * scaleY}px`;
+            inputField.style.width = `${options.width * scaleX}px`;
+            inputField.style.height = `${options.height * scaleY}px`;
+        };
+
+        const handleInput = () => {
+            options.onInput(inputField.value);
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Enter') {
+                options.onEnter();
+            }
+        };
+
+        const focus = () => {
+            updatePosition();
+            inputField.focus();
+        };
+
+        const cleanup = () => {
+            inputField.removeEventListener('input', handleInput);
+            inputField.removeEventListener('keydown', handleKeyDown);
+            this.scale.off('resize', updatePosition);
+            window.removeEventListener('resize', updatePosition);
+            if (inputField.parentNode) {
+                inputField.parentNode.removeChild(inputField);
+            }
+        };
+
+        inputField.addEventListener('input', handleInput);
+        inputField.addEventListener('keydown', handleKeyDown);
+        document.body.appendChild(inputField);
+        updatePosition();
+        this.scale.on('resize', updatePosition);
+        window.addEventListener('resize', updatePosition);
+        window.requestAnimationFrame(updatePosition);
+
+        return { inputField, focus, cleanup };
+    }
+
     private onTimerTick(): void {
         if (tickRoundTimer(this.roundState)) {
             this.endRound();
@@ -134,22 +557,557 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    private reduceTimerForDebug(seconds: number): void {
+        if (!this.roundHasStarted || this.roundState.status !== 'running') {
+            return;
+        }
+
+        this.roundState.timeRemaining = Math.max(0, this.roundState.timeRemaining - seconds);
+
+        if (this.roundState.timeRemaining <= 0) {
+            this.endRound();
+            return;
+        }
+
+        this.updateHUD();
+        this.showFeedback(`-${seconds}s`, UI_THEME.palette.accentAlt, 700);
+    }
+
     private endRound(): void {
         this.roundState.status = 'ended';
         this.timerEvent.remove(false);
         this.boardState.selectedPath = [];
 
-        if (this.roundState.score > this.highScore) {
-            this.highScore = this.roundState.score;
+        const finalScore = this.roundState.score;
+        this.submitRoundScore(finalScore);
+
+        if (finalScore > this.highScore) {
+            this.highScore = finalScore;
             this.highScoreStore.set(this.highScore);
-            this.showFeedback(`New High Score: ${this.highScore}!`, COLOR_ACCEPT, 0);
+            this.showFeedback(`New High Score: ${this.highScore}!`, UI_THEME.palette.success, 0);
         } else {
-            this.showFeedback("Time's up!", COLOR_REJECT, 0);
+            this.showFeedback("Time's up!", UI_THEME.palette.danger, 0);
         }
 
         this.updateHUD();
         this.redrawPath();
         this.refreshTileHighlights();
+        this.setButtonEnabled(this.leaderboardButton, true);
+    }
+
+    private submitRoundScore(score: number): void {
+        if (!this.playerProfile || score < 0) {
+            return;
+        }
+
+        void submitLeaderboardScore({
+            playerGUID: this.playerProfile.guid,
+            displayName: this.playerProfile.displayName,
+            score,
+        }).then((result) => {
+            if (result.ok) {
+                return;
+            }
+
+            // Surface the failure without interrupting gameplay flow.
+            this.time.delayedCall(850, () => {
+                this.showFeedback('Online sync failed. You can keep playing.', UI_THEME.palette.danger, 1800);
+            });
+        });
+    }
+
+    private showLeaderboardOverlay(): void {
+        this.leaderboardOverlay?.destroy(true);
+        this.settingsOverlay?.destroy(true);
+
+        const blocker = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W,
+            GAME_H,
+            UI_THEME.palette.backdropDeep,
+            0.78,
+        );
+
+        const panel = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W - 52,
+            GAME_H - 150,
+            UI_THEME.palette.surfaceBase,
+            0.96,
+        );
+
+        const heading = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 235, 'LEADERBOARD', {
+                ...uiTextStyles.title(),
+                fontSize: '28px',
+            })
+            .setOrigin(0.5)
+            .setScale(0.82);
+
+        const profileText = this.add
+            .text(
+                GAME_W / 2,
+                GAME_H / 2 - 206,
+                `Profile: ${this.playerProfile.displayName}`,
+                {
+                    ...uiTextStyles.body(),
+                    fontSize: '12px',
+                    align: 'center',
+                },
+            )
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+
+        const status = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 180, 'Loading...', {
+                ...uiTextStyles.body(),
+                fontSize: '13px',
+                align: 'center',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+
+        const entries = this.add.text(GAME_W / 2, GAME_H / 2 - 140, '', {
+            ...uiTextStyles.body(),
+            align: 'left',
+            lineSpacing: 4,
+            wordWrap: { width: GAME_W - 140 },
+        }).setOrigin(0.5, 0);
+
+        const editNameButton = this.makeButton(
+            GAME_W / 2 - 112,
+            GAME_H / 2 + 181,
+            'EDIT NAME',
+            () => this.showEditNameOverlay(),
+            UI_THEME.palette.accentAlt,
+            {
+                width: 106,
+                height: 32,
+                fontSize: 12,
+            },
+        );
+
+        const resetLocalButton = this.makeButton(
+            GAME_W / 2,
+            GAME_H / 2 + 181,
+            'RESET LOCAL',
+            () => this.showResetConfirmOverlay(),
+            UI_THEME.palette.danger,
+            {
+                width: 114,
+                height: 32,
+                fontSize: 12,
+            },
+        );
+
+        const refreshButton = this.makeButton(
+            GAME_W / 2 + 112,
+            GAME_H / 2 + 224,
+            'REFRESH',
+            () => this.refreshLeaderboard(),
+            UI_THEME.palette.accent,
+            {
+                width: 106,
+                height: 32,
+                fontSize: 13,
+            },
+        );
+
+        const closeButton = this.makeButton(
+            GAME_W / 2,
+            GAME_H / 2 + 224,
+            'CLOSE',
+            () => this.closeLeaderboardOverlay(),
+            UI_THEME.palette.surfaceRaised,
+            {
+                width: 114,
+                height: 32,
+                fontSize: 13,
+            },
+        );
+
+        const resetHelp = this.add
+            .text(
+                GAME_W / 2,
+                GAME_H / 2 + 205,
+                'Reset clears only this device profile and local high score.',
+                {
+                    ...uiTextStyles.body(),
+                    fontSize: '11px',
+                    align: 'center',
+                },
+            )
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+
+        this.leaderboardStatusText = status;
+        this.leaderboardEntriesText = entries;
+        this.leaderboardProfileText = profileText;
+
+        this.leaderboardOverlay = this.add.container(0, 0, [
+            blocker,
+            panel,
+            heading,
+            profileText,
+            status,
+            entries,
+            editNameButton.container,
+            resetLocalButton.container,
+            resetHelp,
+            refreshButton.container,
+            closeButton.container,
+        ]);
+        this.leaderboardOverlay.setDepth(240);
+        this.leaderboardOverlay.setAlpha(0);
+
+        this.tweens.add({
+            targets: this.leaderboardOverlay,
+            alpha: 1,
+            duration: 180,
+            ease: 'Sine.easeOut',
+        });
+
+        this.refreshLeaderboard();
+    }
+
+    private closeLeaderboardOverlay(): void {
+        if (!this.leaderboardOverlay) {
+            return;
+        }
+
+        this.settingsOverlay?.destroy(true);
+        this.settingsOverlay = null;
+
+        const overlay = this.leaderboardOverlay;
+        this.leaderboardOverlay = null;
+        this.leaderboardStatusText = null;
+        this.leaderboardEntriesText = null;
+        this.leaderboardProfileText = null;
+
+        this.tweens.add({
+            targets: overlay,
+            alpha: 0,
+            duration: 160,
+            ease: 'Sine.easeInOut',
+            onComplete: () => overlay.destroy(true),
+        });
+    }
+
+    private async refreshLeaderboard(): Promise<void> {
+        if (!this.leaderboardStatusText || !this.leaderboardEntriesText) {
+            return;
+        }
+
+        this.leaderboardStatusText.setText('Loading leaderboard...');
+        this.leaderboardStatusText.setColor(themeColorHex(UI_THEME.palette.textMuted));
+        this.leaderboardEntriesText.setText('');
+
+        const response = await fetchLeaderboard(20);
+        if (!this.leaderboardStatusText || !this.leaderboardEntriesText) {
+            return;
+        }
+
+        if (!response.ok) {
+            this.leaderboardStatusText.setText('Could not load leaderboard. Tap REFRESH to retry.');
+            this.leaderboardStatusText.setColor(themeColorHex(UI_THEME.palette.danger));
+            this.leaderboardEntriesText.setText('');
+            return;
+        }
+
+        if (response.entries.length === 0) {
+            this.leaderboardStatusText.setText('No scores yet. Be the first to post one.');
+            this.leaderboardStatusText.setColor(themeColorHex(UI_THEME.palette.textMuted));
+            this.leaderboardEntriesText.setText('');
+            return;
+        }
+
+        this.leaderboardStatusText.setText('Top players (global)');
+        this.leaderboardStatusText.setColor(themeColorHex(UI_THEME.palette.success));
+        this.leaderboardEntriesText.setText(this.formatLeaderboardEntries(response.entries));
+    }
+
+    private formatLeaderboardEntries(entries: LeaderboardEntry[]): string {
+        const localGuid = this.playerProfile?.guid;
+        return entries
+            .map((entry, index) => {
+                const rank = String(index + 1).padStart(2, '0');
+                const score = String(entry.score).padStart(5, ' ');
+                const marker = entry.playerGUID === localGuid ? '  < YOU' : '';
+                return `#${rank}  ${score}  ${entry.displayName}${marker}`;
+            })
+            .join('\n');
+    }
+
+    private showEditNameOverlay(): void {
+        this.settingsOverlay?.destroy(true);
+
+        const blocker = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W,
+            GAME_H,
+            UI_THEME.palette.backdropDeep,
+            0.84,
+        );
+
+        const panel = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W - 88,
+            256,
+            UI_THEME.palette.surfaceBase,
+            0.96,
+        );
+
+        const title = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 90, 'EDIT NAME', {
+                ...uiTextStyles.title(),
+                fontSize: '25px',
+            })
+            .setOrigin(0.5)
+            .setScale(0.8);
+
+        const hint = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 52, 'Required, max 20 characters', {
+                ...uiTextStyles.body(),
+                fontSize: '12px',
+                align: 'center',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+
+        const errorText = this.add
+            .text(GAME_W / 2, GAME_H / 2 + 6, '', {
+                ...uiTextStyles.body(),
+                fontSize: '12px',
+                align: 'center',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.danger));
+
+        const inputBox = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2 - 20,
+            GAME_W - 148,
+            42,
+            UI_THEME.palette.surfaceMuted,
+            0.65,
+        );
+        inputBox.setStrokeStyle(1, UI_THEME.palette.borderSoft, 0.5);
+
+        const inputText = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 20, this.playerProfile.displayName, {
+                ...uiTextStyles.body(),
+                fontSize: '18px',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textStrong));
+
+        const { inputField, focus, cleanup } = this.createOverlayTextInput({
+            centerX: GAME_W / 2,
+            centerY: GAME_H / 2 - 20,
+            width: GAME_W - 148,
+            height: 42,
+            initialValue: this.playerProfile.displayName,
+            onInput: (value) => {
+                inputText.setText(value);
+                errorText.setText('');
+            },
+            onEnter: () => saveButton.onClick(),
+        });
+
+        const saveButton = this.makeButton(
+            GAME_W / 2 - 70,
+            GAME_H / 2 + 70,
+            'SAVE',
+            () => {
+                const nextName = inputField.value.trim();
+                const error = validateDisplayName(nextName);
+                if (error) {
+                    errorText.setText(error);
+                    return;
+                }
+
+                this.playerProfile = updatePlayerDisplayName(this.playerProfile, nextName);
+                this.leaderboardProfileText?.setText(`Profile: ${this.playerProfile.displayName}`);
+                this.showFeedback('Name updated', UI_THEME.palette.success, 1200);
+                this.destroySettingsOverlay();
+            },
+            UI_THEME.palette.accent,
+            {
+                width: 100,
+                height: 34,
+                fontSize: 12,
+            },
+        );
+
+        const cancelButton = this.makeButton(
+            GAME_W / 2 + 70,
+            GAME_H / 2 + 70,
+            'CANCEL',
+            () => this.destroySettingsOverlay(),
+            UI_THEME.palette.surfaceRaised,
+            {
+                width: 100,
+                height: 34,
+                fontSize: 12,
+            },
+        );
+
+        this.settingsOverlay = this.add.container(0, 0, [
+            blocker,
+            panel,
+            title,
+            hint,
+            inputBox,
+            inputText,
+            errorText,
+            saveButton.container,
+            cancelButton.container,
+        ]);
+        this.settingsOverlay.setDepth(280);
+        this.settingsOverlay.setAlpha(0);
+
+        this.settingsOverlay.once('destroy', cleanup);
+
+        this.tweens.add({
+            targets: this.settingsOverlay,
+            alpha: 1,
+            duration: 160,
+            ease: 'Sine.easeOut',
+        });
+
+        window.requestAnimationFrame(focus);
+    }
+
+    private showResetConfirmOverlay(): void {
+        this.settingsOverlay?.destroy(true);
+
+        const blocker = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W,
+            GAME_H,
+            UI_THEME.palette.backdropDeep,
+            0.84,
+        );
+
+        const panel = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W - 88,
+            280,
+            UI_THEME.palette.surfaceBase,
+            0.97,
+        );
+
+        const title = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 96, 'RESET LOCAL DATA', {
+                ...uiTextStyles.title(),
+                fontSize: '22px',
+            })
+            .setOrigin(0.5)
+            .setScale(0.78);
+
+        const warning = this.add
+            .text(
+                GAME_W / 2,
+                GAME_H / 2 - 28,
+                'This removes your local profile and local high score\non this device only.\n\nOnline leaderboard records are not deleted.',
+                {
+                    ...uiTextStyles.body(),
+                    fontSize: '12px',
+                    align: 'center',
+                    lineSpacing: 4,
+                },
+            )
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textBody));
+
+        const cancelButton = this.makeButton(
+            GAME_W / 2 - 70,
+            GAME_H / 2 + 92,
+            'CANCEL',
+            () => this.destroySettingsOverlay(),
+            UI_THEME.palette.surfaceRaised,
+            {
+                width: 100,
+                height: 34,
+                fontSize: 12,
+            },
+        );
+
+        const resetButton = this.makeButton(
+            GAME_W / 2 + 70,
+            GAME_H / 2 + 92,
+            'RESET',
+            () => this.performLocalReset(),
+            UI_THEME.palette.danger,
+            {
+                width: 100,
+                height: 34,
+                fontSize: 12,
+            },
+        );
+
+        this.settingsOverlay = this.add.container(0, 0, [
+            blocker,
+            panel,
+            title,
+            warning,
+            cancelButton.container,
+            resetButton.container,
+        ]);
+        this.settingsOverlay.setDepth(280);
+        this.settingsOverlay.setAlpha(0);
+
+        this.tweens.add({
+            targets: this.settingsOverlay,
+            alpha: 1,
+            duration: 160,
+            ease: 'Sine.easeOut',
+        });
+    }
+
+    private destroySettingsOverlay(): void {
+        if (!this.settingsOverlay) {
+            return;
+        }
+
+        const overlay = this.settingsOverlay;
+        this.settingsOverlay = null;
+
+        this.tweens.add({
+            targets: overlay,
+            alpha: 0,
+            duration: 120,
+            ease: 'Sine.easeInOut',
+            onComplete: () => overlay.destroy(true),
+        });
+    }
+
+    private performLocalReset(): void {
+        this.timerEvent?.remove(false);
+        this.roundHasStarted = false;
+        this.pathGraphics.clear();
+        this.clearBoardObjects();
+
+        if (this.roundState) {
+            this.roundState.status = 'ended';
+            this.boardState.selectedPath = [];
+        }
+
+        clearPlayerProfile();
+        this.highScoreStore.clear();
+        this.highScore = 0;
+        this.highScoreText.setText('High: 0');
+
+        this.destroySettingsOverlay();
+        this.closeLeaderboardOverlay();
+        this.showProfileGate();
+        this.showFeedback('Local data reset. Enter a name to continue.', UI_THEME.palette.accentAlt, 2200);
     }
 
     // ─── Board rendering ───────────────────────────────────────────────────────
@@ -181,6 +1139,72 @@ export class GameScene extends Phaser.Scene {
                 ease: 'Sine.easeOut',
             });
         });
+    }
+
+    private playExpansionEffects(expandedEdgeCount: number): void {
+        const motion = UI_THEME.tuning.expansionMotion;
+        const intensity = Math.min(1.8, 1 + expandedEdgeCount * 0.18);
+
+        this.expansionInputLockedUntil = this.time.now + motion.inputLockMs;
+
+        this.cameras.main.shake(
+            Math.round(motion.cameraShakeMs * intensity),
+            motion.cameraShakeIntensity * intensity,
+        );
+
+        const boardCenterX = this.boardLayout.originX + this.boardLayout.boardWidth / 2;
+        const boardCenterY = this.boardLayout.originY + this.boardLayout.boardHeight / 2;
+
+        const flash = this.add.rectangle(
+            boardCenterX,
+            boardCenterY,
+            this.boardLayout.boardWidth + 18,
+            this.boardLayout.boardHeight + 18,
+            UI_THEME.palette.accent,
+            0,
+        );
+
+        this.tweens.add({
+            targets: flash,
+            alpha: motion.flashAlpha,
+            duration: motion.flashInMs,
+            yoyo: true,
+            hold: Math.round(motion.flashOutMs * 0.4),
+            ease: 'Sine.easeOut',
+            onComplete: () => flash.destroy(),
+        });
+
+        this.tileObjects.forEach((container) => {
+            this.tweens.add({
+                targets: container,
+                scaleX: motion.tilePunchScale,
+                scaleY: motion.tilePunchScale,
+                duration: motion.tilePunchMs,
+                yoyo: true,
+                ease: 'Back.Out',
+            });
+        });
+
+        const particleCount = Math.max(4, Math.round(motion.burstParticles * intensity));
+        const particleDistance = motion.burstDistance * intensity;
+        for (let i = 0; i < particleCount; i++) {
+            const angle = (Math.PI * 2 * i) / particleCount;
+            const size = Phaser.Math.Between(motion.particleSizeMin, motion.particleSizeMax);
+            const color = i % 2 === 0 ? UI_THEME.palette.accent : UI_THEME.palette.accentAlt;
+            const particle = this.add.circle(boardCenterX, boardCenterY, size, color, 1);
+
+            this.tweens.add({
+                targets: particle,
+                x: boardCenterX + Math.cos(angle) * particleDistance,
+                y: boardCenterY + Math.sin(angle) * particleDistance,
+                alpha: 0,
+                scaleX: 0.4,
+                scaleY: 0.4,
+                duration: motion.burstMs,
+                ease: 'Cubic.easeOut',
+                onComplete: () => particle.destroy(),
+            });
+        }
     }
 
     private applyExpansionScore(
@@ -232,14 +1256,12 @@ export class GameScene extends Phaser.Scene {
         const { x, y } = this.tileCenter(tile);
         const tileSize = this.boardLayout.tileSize;
 
-        const bg = this.add.rectangle(0, 0, tileSize, tileSize, COLOR_TILE_IDLE, 1)
-            .setStrokeStyle(2, 0x2a2a4e);
+        const bg = this.add.rectangle(0, 0, tileSize, tileSize, UI_THEME.palette.tileIdle, 1);
 
-        const label = this.add.text(0, 0, tile.letter, {
-            fontSize: `${Math.max(18, Math.round(30 * this.boardLayout.scale))}px`,
-            fontFamily: 'Georgia, serif',
-            color: '#f5f5f5',
-        }).setOrigin(0.5);
+        const label = this.add
+            .text(0, 0, tile.letter, uiTextStyles.tileLetter())
+            .setOrigin(0.5)
+            .setColor(themeColorHex(this.getTileLetterColor(tile.index)));
 
         const container = this.add.container(x, y, [bg, label]);
         container.setSize(tileSize, tileSize);
@@ -256,17 +1278,31 @@ export class GameScene extends Phaser.Scene {
         return container;
     }
 
+    private getTileLetterColor(tileIndex: number): number {
+        const existingColor = this.tileLetterColors.get(tileIndex);
+        if (existingColor !== undefined) {
+            return existingColor;
+        }
+
+        const color =
+            TILE_LETTER_COLORS[Math.floor(Math.random() * TILE_LETTER_COLORS.length)] ??
+            UI_THEME.palette.textStrong;
+        this.tileLetterColors.set(tileIndex, color);
+        return color;
+    }
+
     // ─── Input handling ────────────────────────────────────────────────────────
 
     private onTileHover(
         tile: TileData,
         bg: Phaser.GameObjects.Rectangle,
     ): void {
+        if (this.time.now < this.expansionInputLockedUntil) return;
         if (this.roundState.status !== 'running') return;
         const path = this.boardState.selectedPath;
         const alreadySelected = path.some((t) => t.index === tile.index);
         if (!alreadySelected && canAppendTile(path, tile)) {
-            bg.setFillStyle(COLOR_TILE_HOVER);
+            bg.setFillStyle(UI_THEME.palette.tileHover);
         }
     }
 
@@ -274,6 +1310,7 @@ export class GameScene extends Phaser.Scene {
         tile: TileData,
         _bg: Phaser.GameObjects.Rectangle,
     ): void {
+        if (this.time.now < this.expansionInputLockedUntil) return;
         if (this.roundState.status !== 'running') return;
 
         const path = this.boardState.selectedPath;
@@ -310,7 +1347,7 @@ export class GameScene extends Phaser.Scene {
         const selected = this.boardState.selectedPath.some(
             (t) => t.index === tile.index,
         );
-        bg.setFillStyle(selected ? COLOR_TILE_SELECTED : COLOR_TILE_IDLE);
+        bg.setFillStyle(selected ? UI_THEME.palette.tileSelected : UI_THEME.palette.tileIdle);
     }
 
     private tileCenter(tile: TileData): { x: number; y: number } {
@@ -331,7 +1368,11 @@ export class GameScene extends Phaser.Scene {
         const path = this.boardState.selectedPath;
         if (path.length < 2) return;
 
-        this.pathGraphics.lineStyle(Math.max(2, 4 * this.boardLayout.scale), COLOR_TILE_SELECTED, 0.6);
+        this.pathGraphics.lineStyle(
+            Math.max(2, 4 * this.boardLayout.scale),
+            UI_THEME.palette.tileSelected,
+            UI_THEME.emphasis.pathAlpha,
+        );
         this.pathGraphics.beginPath();
         const firstTile = path[0];
         if (!firstTile) return;
@@ -349,6 +1390,14 @@ export class GameScene extends Phaser.Scene {
     // ─── Submission ────────────────────────────────────────────────────────────
 
     private onSubmit(): void {
+        if (this.time.now < this.expansionInputLockedUntil) {
+            return;
+        }
+
+        if (!this.roundHasStarted || this.roundState.status !== 'running') {
+            return;
+        }
+
         const submittedPath = [...this.boardState.selectedPath];
         const result = submitWord(this.roundState, this.boardState.selectedPath);
 
@@ -360,13 +1409,17 @@ export class GameScene extends Phaser.Scene {
             this.animateGrowthPlacements(expansion.placements.map((placement) => placement.tile));
 
             if (expansion.placements.length > 0) {
+                this.playExpansionEffects(expansion.expandedEdges.length);
+            }
+
+            if (expansion.placements.length > 0) {
                 const edges = expansion.expandedEdges.join(', ').toUpperCase();
                 this.showFeedback(
                     `✓ ${scoredResult.word} (+${scoredResult.score}: ${scoredResult.baseScore}+${scoredResult.expansionBonus}) | +${expansion.placements.length} (${edges}) | +${timeBonus}s`,
-                    COLOR_ACCEPT,
+                    UI_THEME.palette.success,
                 );
             } else {
-                this.showFeedback(`✓ ${scoredResult.word} (+${scoredResult.score})`, COLOR_ACCEPT);
+                this.showFeedback(`✓ ${scoredResult.word} (+${scoredResult.score})`, UI_THEME.palette.success);
             }
         } else {
             const messages: Record<string, string> = {
@@ -376,7 +1429,7 @@ export class GameScene extends Phaser.Scene {
                 invalid_path: 'Invalid path',
                 not_in_dictionary: `"${result.word}" is not in dictionary`,
             };
-            this.showFeedback(messages[result.reason] ?? 'Rejected', COLOR_REJECT);
+            this.showFeedback(messages[result.reason] ?? 'Rejected', UI_THEME.palette.danger);
         }
 
         // Clear selection regardless of outcome
@@ -389,79 +1442,114 @@ export class GameScene extends Phaser.Scene {
     // ─── HUD ───────────────────────────────────────────────────────────────────
 
     private buildHUD(): void {
+        const panelWidth = GAME_W - HUD_LAYOUT.panelInsetX * 2;
+        const controlsPanelY = HUD_LAYOUT.controlsPanelY;
+        const controlsPanelHeight = HUD_LAYOUT.controlsPanelHeight;
+        const wordsPanelHeight = HUD_LAYOUT.wordsPanelHeight;
+        const wordsPanelY = GAME_H - wordsPanelHeight / 2 - UI_THEME.spacing.sm;
+
+        this.add.rectangle(
+            GAME_W / 2,
+            HUD_LAYOUT.statusPanelY,
+            GAME_W - 34,
+            HUD_LAYOUT.statusPanelHeight,
+            UI_THEME.palette.surfaceBase,
+            UI_THEME.emphasis.panelAlpha,
+        );
+
+        this.add.rectangle(
+            GAME_W / 2,
+            controlsPanelY,
+            panelWidth,
+            controlsPanelHeight,
+            UI_THEME.palette.surfaceMuted,
+            UI_THEME.emphasis.panelAlpha,
+        );
+
+        this.add.rectangle(
+            GAME_W / 2,
+            wordsPanelY,
+            panelWidth,
+            wordsPanelHeight,
+            UI_THEME.palette.surfaceMuted,
+            UI_THEME.emphasis.panelAlpha,
+        );
+
         // Title
-        this.add.text(GAME_W / 2, 30, 'TANGELO', {
-            fontSize: '28px',
-            fontFamily: 'Georgia, serif',
-            color: '#e94560',
-        }).setOrigin(0.5);
+        this.add.text(GAME_W / 2, 30, 'TANGELO', uiTextStyles.title()).setOrigin(0.5);
 
         // Timer
-        this.timerText = this.add.text(GAME_W / 2, 70, '60', {
-            fontSize: '32px',
-            fontFamily: 'monospace',
-            color: '#f5f5f5',
-        }).setOrigin(0.5);
+        this.timerText = this.add
+            .text(GAME_W / 2, 70, String(ROUND_DURATION_SECONDS), uiTextStyles.timer())
+            .setOrigin(0.5);
+        this.timerText.setInteractive({ useHandCursor: true });
+        this.timerText.on('pointerdown', () => this.reduceTimerForDebug(10));
 
-        this.scoreText = this.add.text(28, 70, 'Score: 0', {
-            fontSize: '18px',
-            fontFamily: 'monospace',
-            color: '#f5f5f5',
-        }).setOrigin(0, 0.5);
+        this.scoreText = this.add.text(28, 70, 'Score: 0', uiTextStyles.metric()).setOrigin(0, 0.5);
 
-        this.highScoreText = this.add.text(GAME_W - 28, 70, `High: ${this.highScore}`, {
-            fontSize: '18px',
-            fontFamily: 'monospace',
-            color: '#f5f5f5',
-        }).setOrigin(1, 0.5);
+        this.highScoreText = this.add
+            .text(GAME_W - 28, 70, `High: ${this.highScore}`, uiTextStyles.metric())
+            .setOrigin(1, 0.5);
 
         // Current word display
-        this.currentWordText = this.add.text(GAME_W / 2, HUD_BOTTOM_ANCHOR_Y + 24, '', {
-            fontSize: '26px',
-            fontFamily: 'Georgia, serif',
-            color: '#f5f5f5',
-            letterSpacing: 6,
-        }).setOrigin(0.5);
+        this.currentWordText = this.add
+            .text(GAME_W / 2, HUD_BOTTOM_ANCHOR_Y + 24, '', uiTextStyles.currentWord())
+            .setOrigin(0.5);
 
         // Feedback message
-        this.feedbackText = this.add.text(GAME_W / 2, HUD_BOTTOM_ANCHOR_Y + 58, '', {
-            fontSize: '16px',
-            fontFamily: 'sans-serif',
-            color: '#4caf50',
-        }).setOrigin(0.5);
+        this.feedbackText = this.add
+            .text(GAME_W / 2, HUD_BOTTOM_ANCHOR_Y + 58, '', uiTextStyles.feedback())
+            .setOrigin(0.5);
 
         // Submit button
-        this.submitButton = this.makeButton(
-            GAME_W / 2,
-            HUD_BOTTOM_ANCHOR_Y + 96,
-            'SUBMIT',
-            () => this.onSubmit(),
-        );
-
-        this.restartButton = this.makeButton(
-            GAME_W - 90,
-            30,
-            'RESTART',
-            () => {
-                this.startRound();
-                this.showFeedback('Round restarted', COLOR_ACCEPT);
-            },
-            0x0f3460,
-        );
-
-        // Word list label
-        this.add.text(28, HUD_BOTTOM_ANCHOR_Y + 148, 'Words:', {
-            fontSize: '14px',
-            fontFamily: 'sans-serif',
-            color: '#888',
+        this.submitButton = this.makeButton(GAME_W / 2, controlsPanelY, 'SUBMIT', () => this.onSubmit(), UI_THEME.palette.accent, {
+            width: HUD_LAYOUT.submitButton.width,
+            height: HUD_LAYOUT.submitButton.height,
         });
 
+        this.restartButton = this.makeButton(
+            HUD_LAYOUT.restartButton.x,
+            HUD_LAYOUT.restartButton.y,
+            'RESTART',
+            () => {
+                this.showStartGate();
+            },
+            UI_THEME.palette.accentAlt,
+            {
+                width: HUD_LAYOUT.restartButton.width,
+                height: HUD_LAYOUT.restartButton.height,
+                fontSize: HUD_LAYOUT.restartButton.fontSize,
+            },
+        );
+
+        this.leaderboardButton = this.makeButton(
+            HUD_LAYOUT.leaderboardButton.x,
+            HUD_LAYOUT.leaderboardButton.y,
+            'LEADERBOARD',
+            () => this.showLeaderboardOverlay(),
+            UI_THEME.palette.surfaceRaised,
+            {
+                width: HUD_LAYOUT.leaderboardButton.width,
+                height: HUD_LAYOUT.leaderboardButton.height,
+                fontSize: HUD_LAYOUT.leaderboardButton.fontSize,
+            },
+        );
+
+        this.setButtonEnabled(this.leaderboardButton, false);
+
+        // Word list label
+        this.add.text(
+            UI_THEME.spacing.lg + 4,
+            wordsPanelY - wordsPanelHeight / 2 + UI_THEME.spacing.md,
+            'Words:',
+            uiTextStyles.label(),
+        );
+
         // Word list scrollable area
-        this.wordListText = this.add.text(28, HUD_BOTTOM_ANCHOR_Y + 168, '', {
-            fontSize: '14px',
-            fontFamily: 'monospace',
-            color: '#ccc',
-            wordWrap: { width: GAME_W - 56 },
+        this.wordListText = this.add.text(UI_THEME.spacing.lg + 4, wordsPanelY - wordsPanelHeight / 2 + 34, '', {
+            ...uiTextStyles.body(),
+            wordWrap: { width: panelWidth - UI_THEME.spacing.lg },
+            lineSpacing: 3,
         });
     }
 
@@ -470,34 +1558,91 @@ export class GameScene extends Phaser.Scene {
         y: number,
         label: string,
         onClick: () => void,
-        bgColor = 0xe94560,
-    ): Phaser.GameObjects.Container {
-        const bg = this.add.rectangle(0, 0, 160, 44, bgColor, 1).setStrokeStyle(2, 0xffffff);
+        bgColor: number = UI_THEME.palette.accent,
+        options?: {
+            width?: number;
+            height?: number;
+            fontSize?: number;
+        },
+    ): UIButton {
+        const width = options?.width ?? 160;
+        const height = options?.height ?? 44;
+        const fontSize = options?.fontSize ?? UI_THEME.typeScale.button;
+
+        const bg = this.add.rectangle(0, 0, width, height, bgColor, 1);
         const text = this.add.text(0, 0, label, {
-            fontSize: '16px',
-            fontFamily: 'sans-serif',
-            color: '#ffffff',
+            ...uiTextStyles.button(),
+            fontSize: `${fontSize}px`,
         }).setOrigin(0.5);
 
         const btn = this.add.container(x, y, [bg, text]);
-        btn.setSize(160, 44);
+        btn.setSize(width, height);
         btn.setInteractive();
-        btn.on('pointerdown', onClick);
-        btn.on('pointerover', () => bg.setFillStyle(Phaser.Display.Color.ValueToColor(bgColor).lighten(20).color));
-        btn.on('pointerout', () => bg.setFillStyle(bgColor));
-        return btn;
+        const button: UIButton = {
+            container: btn,
+            bg,
+            label: text,
+            baseColor: bgColor,
+            onClick,
+            enabled: true,
+        };
+
+        btn.on('pointerdown', () => {
+            if (!button.enabled) return;
+            bg.setFillStyle(
+                Phaser.Display.Color.ValueToColor(bgColor).darken(UI_THEME.emphasis.pressDarken).color,
+            );
+        });
+
+        btn.on('pointerup', () => {
+            if (!button.enabled) return;
+            bg.setFillStyle(bgColor);
+            onClick();
+        });
+
+        btn.on('pointerover', () =>
+            button.enabled &&
+            bg.setFillStyle(
+                Phaser.Display.Color.ValueToColor(bgColor).lighten(UI_THEME.emphasis.hoverLighten).color,
+            ));
+        btn.on('pointerout', () => {
+            bg.setFillStyle(bgColor);
+        });
+
+        return button;
+    }
+
+    private setButtonEnabled(button: UIButton, enabled: boolean): void {
+        button.enabled = enabled;
+        button.container.disableInteractive();
+        if (enabled) {
+            button.container.setInteractive();
+            button.container.setAlpha(1);
+            button.bg.setFillStyle(button.baseColor);
+            button.label.setAlpha(1);
+            return;
+        }
+
+        button.container.setAlpha(UI_THEME.emphasis.disabledAlpha);
+        button.bg.setFillStyle(UI_THEME.palette.surfaceRaised);
+        button.label.setAlpha(0.85);
     }
 
     private updateHUD(): void {
         // Timer colour
         const t = this.roundState.timeRemaining;
-        const timerColor = t <= 10 ? `#e94560` : `#f5f5f5`;
+        const timerColor = t <= 10
+            ? themeColorHex(UI_THEME.palette.timerLow)
+            : themeColorHex(UI_THEME.palette.textStrong);
         this.timerText.setText(String(t).padStart(2, '0'));
         this.timerText.setColor(timerColor);
 
         // Current word
         const word = this.boardState.selectedPath.map((t) => t.letter).join('');
         this.currentWordText.setText(word);
+
+        const canSubmit = this.roundState.status === 'running' && this.boardState.selectedPath.length >= 3;
+        this.setButtonEnabled(this.submitButton, canSubmit);
 
         this.scoreText.setText(`Score: ${this.roundState.score}`);
         this.highScoreText.setText(`High: ${this.highScore}`);
@@ -523,11 +1668,13 @@ export class GameScene extends Phaser.Scene {
             .join('\n');
     }
 
-    private showFeedback(msg: string, color: number, duration = 1600): void {
+    private showFeedback(
+        msg: string,
+        color: number,
+        duration: number = UI_THEME.tuning.feedbackDurationMs,
+    ): void {
         this.feedbackText.setText(msg);
-        this.feedbackText.setColor(
-            `#${color.toString(16).padStart(6, '0')}`,
-        );
+        this.feedbackText.setColor(themeColorHex(color));
 
         if (duration > 0) {
             this.time.delayedCall(duration, () => {

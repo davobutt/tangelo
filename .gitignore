@@ -1,2 +1,9 @@
 node_modules/
 dist/
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/leaderboard.db
+backend/leaderboard.db-shm
+backend/leaderboard.db-wal
+certs/*.pem
