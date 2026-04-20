@@ -217,4 +217,88 @@ describe('endless expansion engine', () => {
         expect(byCol[2]).toBe(6);
         expect(byCol[3]).toBe(6);
     });
+
+    it('blocks expansion that would grow a fully capped 10-row board beyond the limit', () => {
+        const tiles = makeRectBoard(10, 4);
+        const path = [findTile(tiles, 0, 0), findTile(tiles, 0, 1)];
+
+        const result = applyEdgeExpansions(tiles, path, { letterGenerator: () => 'C' });
+
+        expect(result.qualifiedEdges).toEqual(['top']);
+        expect(result.expandedEdges).toEqual([]);
+        expect(result.placements).toEqual([]);
+        expect(tiles).toHaveLength(40);
+    });
+
+    it('only places cells that stay within the 10x10 cap when a frontier is partially in bounds', () => {
+        const tiles = makeRectBoard(9, 4);
+        tiles.push({ index: 36, row: 9, col: 2, letter: 'X' });
+        tiles.push({ index: 37, row: 9, col: 3, letter: 'X' });
+
+        const path = [findTile(tiles, 8, 0), findTile(tiles, 8, 1)];
+        const result = applyEdgeExpansions(tiles, path, { letterGenerator: () => 'D' });
+
+        expect(result.qualifiedEdges).toContain('bottom');
+        expect(result.expandedEdges).toEqual(['bottom']);
+        const bottomPlacements = result.placements.filter((placement) => placement.edge === 'bottom');
+        expect(bottomPlacements).toHaveLength(2);
+        expect(bottomPlacements.map((placement) => [placement.tile.row, placement.tile.col])).toEqual([
+            [9, 0],
+            [9, 1],
+        ]);
+    });
+
+    it('applies capped multi-edge expansion independently per edge without exceeding 10x10', () => {
+        const tiles = makeRectBoard(9, 10);
+        const path = [
+            findTile(tiles, 0, 0),
+            findTile(tiles, 0, 1),
+            findTile(tiles, 0, 2),
+            findTile(tiles, 0, 3),
+            findTile(tiles, 0, 4),
+            findTile(tiles, 0, 5),
+            findTile(tiles, 0, 6),
+            findTile(tiles, 0, 7),
+            findTile(tiles, 0, 8),
+            findTile(tiles, 0, 9),
+            findTile(tiles, 1, 9),
+            findTile(tiles, 2, 9),
+            findTile(tiles, 3, 9),
+            findTile(tiles, 4, 9),
+            findTile(tiles, 5, 9),
+            findTile(tiles, 6, 9),
+            findTile(tiles, 7, 9),
+            findTile(tiles, 8, 9),
+            findTile(tiles, 8, 8),
+            findTile(tiles, 8, 7),
+            findTile(tiles, 8, 6),
+            findTile(tiles, 8, 5),
+            findTile(tiles, 8, 4),
+            findTile(tiles, 8, 3),
+            findTile(tiles, 8, 2),
+            findTile(tiles, 8, 1),
+            findTile(tiles, 8, 0),
+            findTile(tiles, 7, 0),
+            findTile(tiles, 6, 0),
+            findTile(tiles, 5, 0),
+            findTile(tiles, 4, 0),
+            findTile(tiles, 3, 0),
+            findTile(tiles, 2, 0),
+            findTile(tiles, 1, 0),
+        ];
+
+        const result = applyEdgeExpansions(tiles, path, { letterGenerator: () => 'E' });
+
+        expect(new Set(result.qualifiedEdges)).toEqual(new Set(['top', 'right', 'bottom', 'left']));
+        expect(result.expandedEdges).toContain('top');
+        expect(result.expandedEdges).not.toContain('bottom');
+        result.placements.forEach((placement) => {
+            expect(placement.tile.row).toBeGreaterThanOrEqual(-1);
+            expect(placement.tile.row).toBeLessThanOrEqual(8);
+            expect(placement.tile.col).toBeGreaterThanOrEqual(0);
+            expect(placement.tile.col).toBeLessThanOrEqual(9);
+        });
+        expect(Math.max(...tiles.map((tile) => tile.col)) - Math.min(...tiles.map((tile) => tile.col)) + 1).toBe(10);
+        expect(Math.max(...tiles.map((tile) => tile.row)) - Math.min(...tiles.map((tile) => tile.row)) + 1).toBe(10);
+    });
 });
