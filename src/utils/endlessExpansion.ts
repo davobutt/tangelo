@@ -10,7 +10,7 @@ import {
 import { generateExpansionLetter } from './playableLetterGeneration';
 
 const LETTERS_PER_EDGE = 4;
-const MAX_BOARD_DIMENSION = 10;
+const MAX_BOARD_DIMENSION = 8;
 
 interface ExpansionOptions {
     lettersPerEdge?: number;

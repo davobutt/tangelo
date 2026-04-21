@@ -42,4 +42,19 @@ describe('calculateBoardLayout', () => {
         expect(layout.originX + layout.boardWidth).toBeLessThanOrEqual(viewport.x + viewport.width);
         expect(layout.originY + layout.boardHeight).toBeLessThanOrEqual(viewport.y + viewport.height);
     });
+
+    it('keeps a full 8x8 capped board visible in viewport', () => {
+        const layout = calculateBoardLayout(
+            { minRow: -1, maxRow: 6, minCol: -1, maxCol: 6 },
+            viewport,
+            options,
+        );
+
+        expect(layout.cols).toBe(8);
+        expect(layout.rows).toBe(8);
+        expect(layout.originX).toBeGreaterThanOrEqual(viewport.x);
+        expect(layout.originY).toBeGreaterThanOrEqual(viewport.y);
+        expect(layout.originX + layout.boardWidth).toBeLessThanOrEqual(viewport.x + viewport.width);
+        expect(layout.originY + layout.boardHeight).toBeLessThanOrEqual(viewport.y + viewport.height);
+    });
 });
