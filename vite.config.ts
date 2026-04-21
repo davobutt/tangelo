@@ -5,7 +5,7 @@ export default defineConfig({
         host: true,
         port: 5173,
         strictPort: true,
-        allowedHosts: ['mini.local', 'localhost', '127.0.0.1'],
+        allowedHosts: ['.local', 'localhost', '127.0.0.1'],
     },
     build: { target: 'es2020' },
 });
