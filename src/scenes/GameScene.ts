@@ -16,7 +16,11 @@ import { applyEdgeExpansions } from '../utils/endlessExpansion';
 import { applyExpansionTimeBonus } from '../utils/endlessTimer';
 import { tickRoundTimer } from '../utils/endlessRunLifecycle';
 import { getBoardBounds } from '../utils/boardGeometry';
-import { calculateBoardLayout, type BoardLayout } from '../utils/boardLayout';
+import {
+    calculateBoardLayout,
+    calculateBoardOutlineRect,
+    type BoardLayout,
+} from '../utils/boardLayout';
 import { scoreSubmission } from '../utils/scoring';
 import { UI_THEME, themeColorHex, uiTextStyles } from '../theme/uiTheme';
 import {
@@ -45,6 +49,7 @@ const GAME_H = 640;
 
 const BASE_TILE_SIZE = 72;
 const BASE_TILE_GAP = 8;
+const ORIGINAL_FOOTPRINT = { minRow: 0, maxRow: 3, minCol: 0, maxCol: 3 } as const;
 const BOARD_VIEWPORT = {
     x: 24,
     y: 110,
@@ -122,6 +127,7 @@ export class GameScene extends Phaser.Scene {
 
     // Phaser display objects
     private tileObjects: Phaser.GameObjects.Container[] = [];
+    private originalFootprintGraphics!: Phaser.GameObjects.Graphics;
     private pathGraphics!: Phaser.GameObjects.Graphics;
     private timerText!: Phaser.GameObjects.Text;
     private scoreText!: Phaser.GameObjects.Text;
@@ -182,6 +188,7 @@ export class GameScene extends Phaser.Scene {
         this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, UI_THEME.palette.backdropDeep);
         this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W - 24, GAME_H - 24, UI_THEME.palette.backdropMid, 0.45);
 
+        this.originalFootprintGraphics = this.add.graphics();
         this.pathGraphics = this.add.graphics();
 
         this.ensureLaunchSelection();
@@ -1398,6 +1405,7 @@ export class GameScene extends Phaser.Scene {
     // ─── Board rendering ───────────────────────────────────────────────────────
 
     private clearBoardObjects(): void {
+        this.originalFootprintGraphics.clear();
         this.tileObjects.forEach((c) => c.destroy());
         this.tileObjects = [];
     }
@@ -1552,6 +1560,8 @@ export class GameScene extends Phaser.Scene {
             fitPadding: 0.95,
         });
 
+        this.drawOriginalFootprint(bounds);
+
         const sortedTiles = [...this.boardState.tiles].sort(
             (a, b) => a.row - b.row || a.col - b.col,
         );
@@ -1560,6 +1570,27 @@ export class GameScene extends Phaser.Scene {
             const container = this.makeTileObject(tile);
             this.tileObjects.push(container);
         });
+    }
+
+    private drawOriginalFootprint(bounds: ReturnType<typeof getBoardBounds>): void {
+        const padding = Math.max(2, 6 * this.boardLayout.scale);
+        const lineWidth = Math.max(1, 2 * this.boardLayout.scale);
+        const cornerRadius = Math.max(8, UI_THEME.radii.tile * this.boardLayout.scale + padding * 0.4);
+        const outline = calculateBoardOutlineRect(bounds, ORIGINAL_FOOTPRINT, this.boardLayout, padding);
+
+        this.originalFootprintGraphics.clear();
+        this.originalFootprintGraphics.lineStyle(
+            lineWidth,
+            UI_THEME.palette.footprintBorder,
+            0.8,
+        );
+        this.originalFootprintGraphics.strokeRoundedRect(
+            outline.x,
+            outline.y,
+            outline.width,
+            outline.height,
+            cornerRadius,
+        );
     }
 
     private makeTileObject(tile: TileData): Phaser.GameObjects.Container {

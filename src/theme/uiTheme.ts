@@ -23,6 +23,7 @@ export const UI_THEME = {
         timerLow: 0xef4444,
         borderStrong: 0x4b647d,
         borderSoft: 0x3c5168,
+        footprintBorder: 0x7b91a8,
     },
     typeScale: {
         title: 34,

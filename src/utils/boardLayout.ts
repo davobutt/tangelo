@@ -27,6 +27,13 @@ export interface BoardLayout {
     rows: number;
 }
 
+export interface BoardOutlineRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
 function spanSize(count: number, tileSize: number, gap: number): number {
     if (count <= 0) return 0;
     return count * tileSize + (count - 1) * gap;
@@ -69,5 +76,23 @@ export function calculateBoardLayout(
         originY,
         cols,
         rows,
+    };
+}
+
+export function calculateBoardOutlineRect(
+    boardBounds: BoardBounds,
+    targetBounds: BoardBounds,
+    layout: BoardLayout,
+    padding = 0,
+): BoardOutlineRect {
+    const step = layout.tileSize + layout.gap;
+    const cols = targetBounds.maxCol - targetBounds.minCol + 1;
+    const rows = targetBounds.maxRow - targetBounds.minRow + 1;
+
+    return {
+        x: layout.originX + (targetBounds.minCol - boardBounds.minCol) * step - padding,
+        y: layout.originY + (targetBounds.minRow - boardBounds.minRow) * step - padding,
+        width: spanSize(cols, layout.tileSize, layout.gap) + padding * 2,
+        height: spanSize(rows, layout.tileSize, layout.gap) + padding * 2,
     };
 }
