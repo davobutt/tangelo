@@ -25,6 +25,7 @@ import {
     type LeaderboardEntry,
 } from '../utils/leaderboardClient';
 import { resolveRunContext, type LaunchMode, type RunContext } from '../utils/runContext';
+import { sanitizeSeedCodeInput, normalizeSeedCode, SEED_CODE_LENGTH } from '../utils/seedCode';
 import {
     loadPlayerProfile,
     savePlayerProfile,
@@ -424,18 +425,15 @@ export class GameScene extends Phaser.Scene {
             codeBoxes.push({ box, text });
         }
 
-        const sanitizeCodeValue = (value: string): string =>
-            value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
-
         const updateCodeBoxes = (value: string): void => {
-            const activeIndex = Math.min(value.length, 4);
+            const activeIndex = Math.min(value.length, SEED_CODE_LENGTH - 1);
             codeBoxes.forEach(({ box, text }, index) => {
                 const char = value[index] ?? '';
                 text.setText(char);
                 box.setStrokeStyle(
                     1,
-                    index === activeIndex && value.length < 5 ? UI_THEME.palette.accent : UI_THEME.palette.borderSoft,
-                    index === activeIndex && value.length < 5 ? 0.95 : 0.5,
+                    index === activeIndex && value.length < SEED_CODE_LENGTH ? UI_THEME.palette.accent : UI_THEME.palette.borderSoft,
+                    index === activeIndex && value.length < SEED_CODE_LENGTH ? 0.95 : 0.5,
                 );
                 box.setFillStyle(UI_THEME.palette.surfaceMuted, char ? 0.9 : 0.72);
             });
@@ -449,22 +447,22 @@ export class GameScene extends Phaser.Scene {
             width: totalCodeWidth,
             height: codeBoxSize,
             initialValue: initialCode,
-            maxLength: 5,
+            maxLength: SEED_CODE_LENGTH,
             ariaLabel: 'Seed code',
             autocomplete: 'off',
             autocapitalize: 'characters',
             onInput: (value) => {
-                const normalizedValue = sanitizeCodeValue(value);
+                const normalizedValue = sanitizeSeedCodeInput(value);
                 if (inputField.value !== normalizedValue) {
                     inputField.value = normalizedValue;
                 }
                 updateCodeBoxes(normalizedValue);
                 if (startButton) {
-                    this.setButtonEnabled(startButton, normalizedValue.length === 5);
+                    this.setButtonEnabled(startButton, normalizedValue.length === SEED_CODE_LENGTH);
                 }
             },
             onEnter: () => {
-                if (inputField.value.length === 5) {
+                if (inputField.value.length === SEED_CODE_LENGTH) {
                     startButton?.onClick();
                 }
             },
@@ -475,12 +473,12 @@ export class GameScene extends Phaser.Scene {
             GAME_H / 2 + 62,
             'START',
             () => {
-                const nextCode = sanitizeCodeValue(inputField.value);
-                if (nextCode.length !== 5) {
+                const nextCode = normalizeSeedCode(inputField.value);
+                if (!nextCode) {
                     return;
                 }
 
-                this.selectLaunchMode('enter-code', nextCode.toLowerCase());
+                this.selectLaunchMode('enter-code', nextCode);
                 this.codeEntryOverlay?.destroy(true);
                 this.codeEntryOverlay = null;
                 this.enterRoundFromGate();
@@ -492,7 +490,7 @@ export class GameScene extends Phaser.Scene {
                 fontSize: 12,
             },
         );
-        this.setButtonEnabled(startButton, inputField.value.length === 5);
+        this.setButtonEnabled(startButton, inputField.value.length === SEED_CODE_LENGTH);
 
         const cancelButton = this.makeButton(
             GAME_W / 2 + 70,
@@ -710,8 +708,9 @@ export class GameScene extends Phaser.Scene {
 
     private selectLaunchMode(mode: LaunchMode, seed?: string | null): void {
         this.registry.set(RUN_LAUNCH_MODE_REGISTRY_KEY, mode);
-        if (seed && seed.trim().length > 0) {
-            this.registry.set(RUN_SEED_REGISTRY_KEY, seed.trim());
+        const normalizedSeed = mode === 'enter-code' ? normalizeSeedCode(seed) : seed?.trim() ?? null;
+        if (normalizedSeed && normalizedSeed.length > 0) {
+            this.registry.set(RUN_SEED_REGISTRY_KEY, normalizedSeed);
         } else {
             this.registry.remove(RUN_SEED_REGISTRY_KEY);
         }

@@ -1,3 +1,5 @@
+import { formatSeedCodeLabel, normalizeSeedCode } from './seedCode';
+
 export type RunMode = 'normal' | 'challenge' | 'seeded';
 export type LaunchMode = 'free-play' | 'challenge' | 'enter-code';
 
@@ -46,20 +48,11 @@ export function createChallengeHighScoreKey(seedKey: string): string {
     return `tangelo.challenge.${encodeURIComponent(seedKey)}.highScore`;
 }
 
-function createCodeLabel(seedKey: string): string {
-    const compact = seedKey.trim();
-    if (compact.length <= 12) {
-        return compact.toUpperCase();
-    }
-
-    return `${compact.slice(0, 9).toUpperCase()}...`;
-}
-
 export function resolveRunContext(options: RunContextOptions = {}): RunContext {
     const launchMode = normalizeLaunchMode(options.launchMode);
-    const manualSeed = normalizeSeed(options.manualSeed);
+    const manualSeed = normalizeSeedCode(options.manualSeed);
     if ((launchMode === 'enter-code' || (!launchMode && manualSeed)) && manualSeed) {
-        const codeLabel = createCodeLabel(manualSeed);
+        const codeLabel = formatSeedCodeLabel(manualSeed);
         return {
             mode: 'seeded',
             launchMode: 'enter-code',

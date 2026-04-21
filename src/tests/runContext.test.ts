@@ -13,14 +13,14 @@ describe('resolveRunContext', () => {
         });
     });
 
-    it('uses a custom code context for manual seeded runs', () => {
-        expect(resolveRunContext({ launchMode: 'enter-code', manualSeed: 'family-night' })).toEqual({
+    it('uses a normalized custom code context for manual seeded runs', () => {
+        expect(resolveRunContext({ launchMode: 'enter-code', manualSeed: ' Apple ' })).toEqual({
             mode: 'seeded',
             launchMode: 'enter-code',
-            seedKey: 'family-night',
-            highScoreStorageKey: 'tangelo.seeded.family-night.highScore',
-            leaderboardLabel: 'Top players (code FAMILY-NIGHT)',
-            modeLabel: 'CODE FAMILY-NIGHT',
+            seedKey: 'apple',
+            highScoreStorageKey: 'tangelo.seeded.apple.highScore',
+            leaderboardLabel: 'Top players (code APPLE)',
+            modeLabel: 'CODE APPLE',
         });
     });
 
@@ -43,6 +43,17 @@ describe('resolveRunContext', () => {
             highScoreStorageKey: 'tangelo.challenge.daily-2026-04-20.highScore',
             leaderboardLabel: 'Top players (challenge)',
             modeLabel: 'CHALLENGE',
+        });
+    });
+
+    it('does not enter custom code mode for invalid non-5-letter seeds', () => {
+        expect(resolveRunContext({ launchMode: 'enter-code', manualSeed: 'abc' })).toEqual({
+            mode: 'normal',
+            launchMode: 'free-play',
+            seedKey: null,
+            highScoreStorageKey: 'tangelo.endless.highScore',
+            leaderboardLabel: 'Top players (free play)',
+            modeLabel: 'FREE PLAY',
         });
     });
 });
