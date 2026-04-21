@@ -12,6 +12,7 @@ export const UI_THEME = {
         tileIdle: 0x2a4057,
         tileHover: 0x35506b,
         tileSelected: 0xff5d5d,
+        tileSpecialFound: 0x325268,
         textStrong: 0xf9fafb,
         textBody: 0xe5e7eb,
         textMuted: 0x9ca3af,

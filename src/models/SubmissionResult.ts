@@ -6,6 +6,7 @@ export interface AcceptedSubmissionResult {
     score: number;
     baseScore: number;
     expansionBonus: number;
+    hiddenWordBonus: number;
     expandedEdgeCount: number;
 }
 

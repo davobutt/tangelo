@@ -28,6 +28,7 @@ import {
 } from '../utils/leaderboardClient';
 import { resolveRunContext, type LaunchMode, type RunContext } from '../utils/runContext';
 import { sanitizeSeedCodeInput, normalizeSeedCode, SEED_CODE_LENGTH } from '../utils/seedCode';
+import { getCuratedHiddenWordBonus } from '../utils/playableLetterGeneration';
 import {
     loadPlayerProfile,
     savePlayerProfile,
@@ -156,6 +157,7 @@ export class GameScene extends Phaser.Scene {
     private activeRunContext: RunContext = resolveRunContext();
     private challengeLaunchInFlight = false;
     private tileLetterColors = new Map<number, number>();
+    private foundCuratedTileIndexes = new Set<number>();
     private boardMinRow = 0;
     private boardMinCol = 0;
     private boardLayout: BoardLayout = {
@@ -210,6 +212,7 @@ export class GameScene extends Phaser.Scene {
             ? generateBoard({ seed: this.activeRunSeed })
             : generateBoard();
         this.tileLetterColors.clear();
+        this.foundCuratedTileIndexes.clear();
         this.boardState = { tiles, selectedPath: [] };
         this.roundState = createRoundState();
         this.roundHasStarted = true;
@@ -1581,6 +1584,7 @@ export class GameScene extends Phaser.Scene {
         // Store references for later highlight updates
         (container as unknown as { tileData: TileData; bg: Phaser.GameObjects.Rectangle }).tileData = tile;
         (container as unknown as { tileData: TileData; bg: Phaser.GameObjects.Rectangle }).bg = bg;
+        this.refreshTileBg(tile, bg);
 
         return container;
     }
@@ -1654,7 +1658,38 @@ export class GameScene extends Phaser.Scene {
         const selected = this.boardState.selectedPath.some(
             (t) => t.index === tile.index,
         );
-        bg.setFillStyle(selected ? UI_THEME.palette.tileSelected : UI_THEME.palette.tileIdle);
+        const foundCuratedTile = this.foundCuratedTileIndexes.has(tile.index);
+        bg.setFillStyle(
+            selected
+                ? UI_THEME.palette.tileSelected
+                : foundCuratedTile
+                    ? UI_THEME.palette.tileSpecialFound
+                    : UI_THEME.palette.tileIdle,
+        );
+    }
+
+    private applyCuratedWordBonus(
+        result: AcceptedSubmissionResult,
+        submittedPath: TileData[],
+    ): AcceptedSubmissionResult {
+        const hiddenWordBonus = getCuratedHiddenWordBonus(this.activeRunSeed, result.word);
+        if (hiddenWordBonus < 1) {
+            return result;
+        }
+
+        this.roundState.score += hiddenWordBonus;
+        submittedPath.forEach((tile) => this.foundCuratedTileIndexes.add(tile.index));
+
+        const latest = this.roundState.wordHistory[0];
+        if (latest?.status === 'accepted') {
+            latest.score += hiddenWordBonus;
+        }
+
+        return {
+            ...result,
+            score: result.score + hiddenWordBonus,
+            hiddenWordBonus,
+        };
     }
 
     private tileCenter(tile: TileData): { x: number; y: number } {
@@ -1713,6 +1748,7 @@ export class GameScene extends Phaser.Scene {
                 ? applyEdgeExpansions(this.boardState.tiles, submittedPath, { seed: this.activeRunSeed })
                 : applyEdgeExpansions(this.boardState.tiles, submittedPath);
             const scoredResult = this.applyExpansionScore(result, expansion.expandedEdges.length);
+            const bonusResult = this.applyCuratedWordBonus(scoredResult, submittedPath);
             const timeBonus = applyExpansionTimeBonus(this.roundState, expansion.expandedEdges.length);
             this.showTimerBonus(timeBonus);
             this.rebuildBoard();
@@ -1724,11 +1760,18 @@ export class GameScene extends Phaser.Scene {
 
             if (expansion.placements.length > 0) {
                 this.showFeedback(
-                    `✓ ${scoredResult.word} (+${scoredResult.score}: ${scoredResult.baseScore}+${scoredResult.expansionBonus})`,
+                    bonusResult.hiddenWordBonus > 0
+                        ? `✓ ${bonusResult.word} (+${bonusResult.score}: ${bonusResult.baseScore}+${bonusResult.expansionBonus}+${bonusResult.hiddenWordBonus})`
+                        : `✓ ${bonusResult.word} (+${bonusResult.score}: ${bonusResult.baseScore}+${bonusResult.expansionBonus})`,
                     UI_THEME.palette.success,
                 );
             } else {
-                this.showFeedback(`✓ ${scoredResult.word} (+${scoredResult.score})`, UI_THEME.palette.success);
+                this.showFeedback(
+                    bonusResult.hiddenWordBonus > 0
+                        ? `✓ ${bonusResult.word} (+${bonusResult.score}: ${bonusResult.baseScore}+${bonusResult.hiddenWordBonus})`
+                        : `✓ ${bonusResult.word} (+${bonusResult.score})`,
+                    UI_THEME.palette.success,
+                );
             }
         } else {
             const messages: Record<string, string> = {

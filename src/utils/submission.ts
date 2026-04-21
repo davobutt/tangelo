@@ -58,6 +58,7 @@ export function submitWord(
         score: scoreBreakdown.totalScore,
         baseScore: scoreBreakdown.baseScore,
         expansionBonus: scoreBreakdown.expansionBonus,
+        hiddenWordBonus: 0,
         expandedEdgeCount: 0,
     };
 }

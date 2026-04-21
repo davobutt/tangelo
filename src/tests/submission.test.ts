@@ -31,6 +31,7 @@ describe('submitWord', () => {
             expect(result.score).toBe(1);
             expect(result.baseScore).toBe(1);
             expect(result.expansionBonus).toBe(0);
+            expect(result.hiddenWordBonus).toBe(0);
             expect(result.expandedEdgeCount).toBe(0);
         }
         expect(round.submittedWords).toContain('CAT');

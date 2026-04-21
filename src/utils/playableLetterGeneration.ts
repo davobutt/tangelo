@@ -1,5 +1,10 @@
 import type { TileData } from '../models/Tile';
-import { CURATED_SEED_DEFINITIONS, type CuratedSeedDefinition } from './curatedSeedConfig';
+import {
+    CURATED_SEED_DEFINITIONS,
+    type CuratedExpansionWordPlacement,
+    type CuratedSeedCoord,
+    type CuratedSeedDefinition,
+} from './curatedSeedConfig';
 import { fullDictionary, normalizeWord } from './dictionary';
 import { normalizeSeedCode } from './seedCode';
 
@@ -70,6 +75,14 @@ interface ValidatedCuratedSeedDefinition extends CuratedSeedDefinition {
     seed: string;
     theme: string;
     hiddenWords: readonly string[];
+    openingHiddenWords: readonly string[];
+    expansionHiddenWordPlacements: readonly ValidatedCuratedExpansionWordPlacement[];
+    expansionLetterOverrides: ReadonlyMap<string, string>;
+}
+
+interface ValidatedCuratedExpansionWordPlacement {
+    word: string;
+    path: readonly CuratedSeedCoord[];
 }
 
 function hashString(input: string): number {
@@ -120,6 +133,10 @@ function deterministicWeightedLetter(key: string): string {
 
 function coordKey(row: number, col: number): string {
     return `${row},${col}`;
+}
+
+function isOpeningCoord(row: number, col: number): boolean {
+    return row >= 0 && row < OPENING_SIZE && col >= 0 && col < OPENING_SIZE;
 }
 
 function openingCoordIndex(row: number, col: number): number {
@@ -289,6 +306,70 @@ function containsWordPath(letters: string[], word: string): boolean {
     return tiles.some((_, index) => dfs(index, 0));
 }
 
+function validateExpansionWordPlacement(
+    seed: string,
+    placement: CuratedExpansionWordPlacement,
+): ValidatedCuratedExpansionWordPlacement {
+    const word = normalizeWord(placement.word);
+    const path = placement.path.map((coord) => ({ row: coord.row, col: coord.col }));
+
+    if (path.length !== word.length) {
+        throw new Error(
+            `Curated seed "${seed}" has expansion placement length mismatch for "${word}".`,
+        );
+    }
+
+    const visited = new Set<string>();
+    path.forEach((coord, index) => {
+        const key = coordKey(coord.row, coord.col);
+        if (visited.has(key)) {
+            throw new Error(`Curated seed "${seed}" reuses expansion cell ${key} within "${word}".`);
+        }
+        visited.add(key);
+
+        if (isOpeningCoord(coord.row, coord.col)) {
+            throw new Error(
+                `Curated seed "${seed}" must keep expansion placement "${word}" outside the opening 4x4 grid.`,
+            );
+        }
+
+        const previous = path[index - 1];
+        if (
+            previous &&
+            (Math.abs(coord.row - previous.row) > 1 ||
+                Math.abs(coord.col - previous.col) > 1 ||
+                (coord.row === previous.row && coord.col === previous.col))
+        ) {
+            throw new Error(`Curated seed "${seed}" has a non-adjacent expansion path for "${word}".`);
+        }
+    });
+
+    return { word, path };
+}
+
+function buildExpansionLetterOverrides(
+    seed: string,
+    placements: readonly ValidatedCuratedExpansionWordPlacement[],
+): ReadonlyMap<string, string> {
+    const overrides = new Map<string, string>();
+
+    placements.forEach((placement) => {
+        placement.path.forEach((coord, index) => {
+            const key = coordKey(coord.row, coord.col);
+            const letter = placement.word[index] ?? '';
+            const existing = overrides.get(key);
+            if (existing && existing !== letter) {
+                throw new Error(
+                    `Curated seed "${seed}" assigns conflicting letters to expansion cell ${key}.`,
+                );
+            }
+            overrides.set(key, letter);
+        });
+    });
+
+    return overrides;
+}
+
 function placeCuratedWordsOnBoard(
     hiddenWords: readonly string[],
     baseLetters: string[],
@@ -326,10 +407,14 @@ function buildCuratedOpeningLetters(
     attempt: number,
 ): string[] {
     const baseLetters = buildSeededOpeningLetters(definition.seed, attempt);
-    const placements = placeCuratedWordsOnBoard(definition.hiddenWords, baseLetters);
+    if (definition.openingHiddenWords.length === 0) {
+        return baseLetters;
+    }
+
+    const placements = placeCuratedWordsOnBoard(definition.openingHiddenWords, baseLetters);
     if (!placements) {
         throw new Error(
-            `Curated seed "${definition.seed}" cannot place hidden words: ${definition.hiddenWords.join(', ')}`,
+            `Curated seed "${definition.seed}" cannot place hidden words: ${definition.openingHiddenWords.join(', ')}`,
         );
     }
 
@@ -368,14 +453,34 @@ export function validateCuratedSeedDefinitions(
             }
         });
 
+        const openingHiddenWords = (definition.openingHiddenWords ?? []).map((word) => normalizeWord(word));
+        openingHiddenWords.forEach((word) => {
+            if (!hiddenWords.includes(word)) {
+                throw new Error(`Curated seed "${seed}" has opening hidden word "${word}" outside hiddenWords.`);
+            }
+        });
+
+        const expansionHiddenWordPlacements = (definition.expansionHiddenWordPlacements ?? [])
+            .map((placement) => validateExpansionWordPlacement(seed, placement));
+        expansionHiddenWordPlacements.forEach((placement) => {
+            if (!hiddenWords.includes(placement.word)) {
+                throw new Error(
+                    `Curated seed "${seed}" has expansion hidden word "${placement.word}" outside hiddenWords.`,
+                );
+            }
+        });
+
         const validatedDefinition: ValidatedCuratedSeedDefinition = {
             seed,
             theme: definition.theme.trim(),
             hiddenWords,
+            openingHiddenWords,
+            expansionHiddenWordPlacements,
+            expansionLetterOverrides: buildExpansionLetterOverrides(seed, expansionHiddenWordPlacements),
         };
 
         const letters = buildCuratedOpeningLetters(validatedDefinition, 0);
-        hiddenWords.forEach((word) => {
+        openingHiddenWords.forEach((word) => {
             if (!containsWordPath(letters, word)) {
                 throw new Error(`Curated seed "${seed}" failed to embed hidden word "${word}".`);
             }
@@ -395,6 +500,25 @@ function getCuratedSeedDefinition(seed: string | undefined): ValidatedCuratedSee
     }
 
     return CURATED_SEEDS.get(seed.trim().toLowerCase()) ?? null;
+}
+
+export function getCuratedHiddenWordBonus(seed: string | null | undefined, word: string): number {
+    const definition = getCuratedSeedDefinition(seed ?? undefined);
+    if (!definition) {
+        return 0;
+    }
+
+    const normalizedWord = normalizeWord(word);
+    return definition.hiddenWords.includes(normalizedWord) ? normalizedWord.length : 0;
+}
+
+function getCuratedLetterOverride(seed: string, row: number, col: number): string | null {
+    const definition = getCuratedSeedDefinition(seed);
+    if (!definition) {
+        return null;
+    }
+
+    return definition.expansionLetterOverrides.get(coordKey(row, col)) ?? null;
 }
 
 export function isVowelLetter(letter: string): boolean {
@@ -618,6 +742,10 @@ function scoreExpansionCandidate(
 
 export function getSeededLetter(seed: string, row: number, col: number): string {
     const normalizedSeed = seed.trim();
+    const curatedOverride = getCuratedLetterOverride(normalizedSeed, row, col);
+    if (curatedOverride) {
+        return curatedOverride;
+    }
     return deterministicWeightedLetter(`${normalizedSeed}:coord:${row},${col}`);
 }
 
