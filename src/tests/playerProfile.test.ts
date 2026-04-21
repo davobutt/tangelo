@@ -4,6 +4,7 @@ import {
     savePlayerProfile,
     createPlayerProfile,
     clearPlayerProfile,
+    PLAYER_PROFILE_STORAGE_KEY,
     updatePlayerDisplayName,
     validateDisplayName,
 } from '../utils/playerProfile';
@@ -111,7 +112,7 @@ describe('Player Profile', () => {
             const profile = createPlayerProfile('TestPlayer');
             savePlayerProfile(profile);
 
-            const stored = localStorage.getItem('boggle_player_profile');
+            const stored = localStorage.getItem(PLAYER_PROFILE_STORAGE_KEY);
             expect(stored).not.toBeNull();
 
             const parsed = JSON.parse(stored!);
@@ -127,7 +128,7 @@ describe('Player Profile', () => {
             const profile2 = createPlayerProfile('Player2');
             savePlayerProfile(profile2);
 
-            const stored = localStorage.getItem('boggle_player_profile');
+            const stored = localStorage.getItem(PLAYER_PROFILE_STORAGE_KEY);
             const parsed = JSON.parse(stored!);
             expect(parsed.displayName).toBe('Player2');
             expect(parsed.guid).toBe(profile2.guid);
@@ -152,19 +153,19 @@ describe('Player Profile', () => {
         });
 
         it('should return null if stored data is invalid', () => {
-            localStorage.setItem('boggle_player_profile', 'invalid json');
+            localStorage.setItem(PLAYER_PROFILE_STORAGE_KEY, 'invalid json');
             const loaded = loadPlayerProfile();
             expect(loaded).toBeNull();
         });
 
         it('should return null if profile is missing required fields', () => {
-            localStorage.setItem('boggle_player_profile', JSON.stringify({ guid: 'test' }));
+            localStorage.setItem(PLAYER_PROFILE_STORAGE_KEY, JSON.stringify({ guid: 'test' }));
             const loaded = loadPlayerProfile();
             expect(loaded).toBeNull();
         });
 
         it('should handle corrupted data gracefully', () => {
-            localStorage.setItem('boggle_player_profile', '{ corrupted json');
+            localStorage.setItem(PLAYER_PROFILE_STORAGE_KEY, '{ corrupted json');
             const loaded = loadPlayerProfile();
             expect(loaded).toBeNull();
         });

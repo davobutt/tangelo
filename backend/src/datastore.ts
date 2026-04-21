@@ -4,7 +4,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { LeaderboardEntry, type LeaderboardQuery, type RunMode } from './types.js';
+import { LeaderboardEntry, type ActiveChallenge, type LeaderboardQuery, type RunMode } from './types.js';
 
 export interface IDatastore {
     initialize(): void;
@@ -15,6 +15,8 @@ export interface IDatastore {
         query?: Partial<LeaderboardQuery>,
     ): LeaderboardEntry;
     getLeaderboard(limit?: number, query?: Partial<LeaderboardQuery>): LeaderboardEntry[];
+    getActiveChallenge(): ActiveChallenge | null;
+    setActiveChallenge(activeChallenge: ActiveChallenge): ActiveChallenge;
     close(): void;
 }
 
@@ -62,6 +64,15 @@ class SqliteDatastore implements IDatastore {
     `);
 
         this.ensureLeaderboardSchema();
+
+        this.db.exec(`
+      CREATE TABLE IF NOT EXISTS active_challenge (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        seedCode TEXT NOT NULL,
+        leaderboardSeedKey TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+    `);
 
         // Create index for efficient score ranking queries
         this.db.exec(`
@@ -325,6 +336,30 @@ class SqliteDatastore implements IDatastore {
         return stmt.all(categoryKey, limit) as LeaderboardEntry[];
     }
 
+    getActiveChallenge(): ActiveChallenge | null {
+        const row = this.db.prepare(`
+            SELECT seedCode, leaderboardSeedKey, updatedAt
+            FROM active_challenge
+            WHERE singleton = 1
+            LIMIT 1
+        `).get() as ActiveChallenge | undefined;
+
+        return row ?? null;
+    }
+
+    setActiveChallenge(activeChallenge: ActiveChallenge): ActiveChallenge {
+        this.db.prepare(`
+            INSERT INTO active_challenge (singleton, seedCode, leaderboardSeedKey, updatedAt)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(singleton) DO UPDATE SET
+                seedCode = excluded.seedCode,
+                leaderboardSeedKey = excluded.leaderboardSeedKey,
+                updatedAt = excluded.updatedAt
+        `).run(activeChallenge.seedCode, activeChallenge.leaderboardSeedKey, activeChallenge.updatedAt);
+
+        return this.getActiveChallenge()!;
+    }
+
     close(): void {
         this.db.close();
     }
@@ -332,6 +367,7 @@ class SqliteDatastore implements IDatastore {
 
 class MemoryDatastore implements IDatastore {
     private entriesByGuid: Map<string, LeaderboardEntry> = new Map();
+    private activeChallenge: ActiveChallenge | null = null;
 
     initialize(): void {
         // No-op for memory datastore
@@ -382,8 +418,18 @@ class MemoryDatastore implements IDatastore {
             .slice(0, limit);
     }
 
+    getActiveChallenge(): ActiveChallenge | null {
+        return this.activeChallenge ? { ...this.activeChallenge } : null;
+    }
+
+    setActiveChallenge(activeChallenge: ActiveChallenge): ActiveChallenge {
+        this.activeChallenge = { ...activeChallenge };
+        return { ...activeChallenge };
+    }
+
     close(): void {
         this.entriesByGuid.clear();
+        this.activeChallenge = null;
     }
 }
 

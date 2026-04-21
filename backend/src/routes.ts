@@ -8,11 +8,23 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { IDatastore } from './datastore.js';
 import {
     validateScoreSubmission,
+    validateActiveChallengeUpdate,
     ApiError,
+    ActiveChallenge,
+    ActiveChallengeResponse,
     LeaderboardResponse,
+    createChallengeLeaderboardSeedKey,
+    createDefaultActiveChallenge,
+    normalizeChallengeSeedCode,
+    normalizeLeaderboardSeedKey,
     type LeaderboardQuery,
+    type ActiveChallengeUpdatePayload,
     type ScoreSubmissionPayload,
 } from './types.js';
+
+export interface ApiRouterOptions {
+    adminToken?: string;
+}
 
 function parseLeaderboardQuery(req: Request): LeaderboardQuery {
     const requestedMode = String(req.query.runMode ?? '').trim();
@@ -45,8 +57,97 @@ function parseSubmissionRunMode(payload: ScoreSubmissionPayload): LeaderboardQue
     return { runMode, seedKey };
 }
 
-export function createApiRouter(datastore: IDatastore): Router {
+function buildActiveChallenge(payload: ActiveChallengeUpdatePayload): ActiveChallenge {
+    const seedCode = normalizeChallengeSeedCode(payload.seedCode);
+    if (!seedCode) {
+        throw new Error('seedCode must be a 5-letter code');
+    }
+
+    const updatedAt = Date.now();
+    return {
+        seedCode,
+        leaderboardSeedKey:
+            normalizeLeaderboardSeedKey(payload.leaderboardSeedKey)
+            ?? createChallengeLeaderboardSeedKey(seedCode, updatedAt),
+        updatedAt,
+    };
+}
+
+function isAuthorizedAdminRequest(req: Request, adminToken?: string): boolean {
+    if (!adminToken) {
+        return true;
+    }
+
+    return req.header('x-admin-token') === adminToken;
+}
+
+export function createApiRouter(datastore: IDatastore, options: ApiRouterOptions = {}): Router {
     const router = Router();
+
+    router.get('/challenge/current', (req: Request, res: Response) => {
+        try {
+            const activeChallenge = datastore.getActiveChallenge() ?? createDefaultActiveChallenge();
+
+            const response: ActiveChallengeResponse = {
+                activeChallenge,
+                timestamp: Date.now(),
+            };
+
+            res.status(200).json(response);
+        } catch (error) {
+            console.error('Error fetching active challenge:', error);
+            const apiError: ApiError = {
+                status: 500,
+                code: 'DATASTORE_ERROR',
+                message: 'Failed to fetch the active challenge. Please try again later.',
+                timestamp: Date.now(),
+            };
+            res.status(500).json(apiError);
+        }
+    });
+
+    router.post('/admin/challenge', (req: Request, res: Response) => {
+        if (!isAuthorizedAdminRequest(req, options.adminToken)) {
+            const error: ApiError = {
+                status: 401,
+                code: 'UNAUTHORIZED',
+                message: 'Admin token required to update the active challenge.',
+                timestamp: Date.now(),
+            };
+            res.status(401).json(error);
+            return;
+        }
+
+        try {
+            const payload = req.body;
+            if (!validateActiveChallengeUpdate(payload)) {
+                const error: ApiError = {
+                    status: 400,
+                    code: 'INVALID_PAYLOAD',
+                    message: 'Invalid active challenge update: seedCode must be a 5-letter code and leaderboardSeedKey must be a non-empty string when provided.',
+                    timestamp: Date.now(),
+                };
+                res.status(400).json(error);
+                return;
+            }
+
+            const activeChallenge = datastore.setActiveChallenge(buildActiveChallenge(payload));
+            res.status(200).json({
+                success: true,
+                activeChallenge,
+                timestamp: Date.now(),
+            });
+        } catch (error) {
+            console.error('Error updating active challenge:', error);
+            const apiError: ApiError = {
+                status: 500,
+                code: 'DATASTORE_ERROR',
+                message: 'Failed to update the active challenge. Please try again later.',
+                timestamp: Date.now(),
+            };
+            res.status(500).json(apiError);
+        }
+    });
 
     /**
      * POST /api/scores

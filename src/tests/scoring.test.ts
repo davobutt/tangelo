@@ -11,7 +11,7 @@ describe('scoreWord', () => {
         expect(scoreWord('IT')).toBe(0);
     });
 
-    it('matches classic Boggle scores', () => {
+    it('matches standard word-game scores', () => {
         expect(scoreWord('CAT')).toBe(1);
         expect(scoreWord('TREE')).toBe(1);
         expect(scoreWord('CLOCK')).toBe(2);

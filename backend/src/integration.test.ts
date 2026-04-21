@@ -4,7 +4,11 @@
  */
 
 import { IDatastore, createDatastore } from './datastore.js';
-import { validateScoreSubmission } from './types.js';
+import {
+    createDefaultActiveChallenge,
+    createChallengeLeaderboardSeedKey,
+    validateScoreSubmission,
+} from './types.js';
 
 function testDatastoreOperations(): void {
     console.log('\n🧪 Testing datastore operations...');
@@ -111,8 +115,74 @@ function testDatastoreOperations(): void {
     }
     console.log('    Seeded and challenge categories are isolated correctly');
 
+    // Test 8: Active challenge configuration is stored independently of score data
+    console.log('  ✓ Test 8: Active challenge configuration persists with separate leaderboard identity');
+    const initialChallenge = datastore.setActiveChallenge({
+        seedCode: 'apple',
+        leaderboardSeedKey: createChallengeLeaderboardSeedKey('apple', 101),
+        updatedAt: 101,
+    });
+    const loadedChallenge = datastore.getActiveChallenge();
+    if (!loadedChallenge) {
+        throw new Error('Expected an active challenge to be available after setting it');
+    }
+    if (loadedChallenge.seedCode !== initialChallenge.seedCode) {
+        throw new Error(`Expected active challenge seedCode ${initialChallenge.seedCode}, got ${loadedChallenge.seedCode}`);
+    }
+    if (loadedChallenge.leaderboardSeedKey !== initialChallenge.leaderboardSeedKey) {
+        throw new Error('Expected active challenge leaderboard identity to round-trip through the datastore');
+    }
+
+    // Test 9: Rotating the active challenge creates a distinct comparison set
+    console.log('  ✓ Test 9: Active challenge rotation creates a distinct leaderboard comparison set');
+    const rotatedChallenge = datastore.setActiveChallenge({
+        seedCode: 'apple',
+        leaderboardSeedKey: createChallengeLeaderboardSeedKey('apple', 202),
+        updatedAt: 202,
+    });
+    datastore.submitScore('player-5', 'Devon', 1600, {
+        runMode: 'challenge',
+        seedKey: initialChallenge.leaderboardSeedKey,
+    });
+    datastore.submitScore('player-6', 'Blair', 1750, {
+        runMode: 'challenge',
+        seedKey: rotatedChallenge.leaderboardSeedKey,
+    });
+    const originalChallengeLeaderboard = datastore.getLeaderboard(10, {
+        runMode: 'challenge',
+        seedKey: initialChallenge.leaderboardSeedKey,
+    });
+    const rotatedChallengeLeaderboard = datastore.getLeaderboard(10, {
+        runMode: 'challenge',
+        seedKey: rotatedChallenge.leaderboardSeedKey,
+    });
+    if (originalChallengeLeaderboard.length !== 1 || originalChallengeLeaderboard[0]?.playerGUID !== 'player-5') {
+        throw new Error('Expected original active challenge leaderboard to retain only its own submissions');
+    }
+    if (rotatedChallengeLeaderboard.length !== 1 || rotatedChallengeLeaderboard[0]?.playerGUID !== 'player-6') {
+        throw new Error('Expected rotated challenge leaderboard to be distinct from the prior active challenge');
+    }
+    console.log('    Active challenge rotation keeps leaderboard comparison sets isolated');
+
     datastore.close();
     console.log('  ✅ All datastore tests passed!\n');
+}
+
+function testDefaultActiveChallenge(): void {
+    console.log('🧪 Testing active challenge fallback...');
+
+    const fallbackChallenge = createDefaultActiveChallenge();
+    if (fallbackChallenge.seedCode !== 'lemon') {
+        throw new Error(`Expected default active challenge seedCode lemon, got ${fallbackChallenge.seedCode}`);
+    }
+    if (fallbackChallenge.leaderboardSeedKey !== 'challenge:lemon:default') {
+        throw new Error(`Expected stable default leaderboard identity, got ${fallbackChallenge.leaderboardSeedKey}`);
+    }
+    if (fallbackChallenge.updatedAt !== 0) {
+        throw new Error(`Expected default active challenge updatedAt 0, got ${fallbackChallenge.updatedAt}`);
+    }
+
+    console.log('  ✅ Default active challenge fallback verified!\n');
 }
 
 function testValidation(): void {
@@ -241,6 +311,7 @@ async function main(): Promise<void> {
 
     try {
         testDatastoreOperations();
+        testDefaultActiveChallenge();
         testValidation();
 
         console.log('='.repeat(50));

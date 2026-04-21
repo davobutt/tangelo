@@ -9,7 +9,7 @@ export interface PlayerProfile {
     createdAt: number; // Timestamp in milliseconds
 }
 
-export const PLAYER_PROFILE_STORAGE_KEY = 'boggle_player_profile';
+export const PLAYER_PROFILE_STORAGE_KEY = 'tangelo_player_profile';
 
 /**
  * Generate a UUID v4-like identifier

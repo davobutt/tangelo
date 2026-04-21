@@ -10,6 +10,9 @@ export interface Config {
         type: 'sqlite' | 'memory';
         dbPath?: string;
     };
+    challenge: {
+        adminToken?: string;
+    };
     logging: {
         level: 'debug' | 'info' | 'warn' | 'error';
     };
@@ -27,6 +30,9 @@ export function getConfig(): Config {
         datastore: {
             type: datastoreType,
             dbPath: process.env.DB_PATH || './leaderboard.db',
+        },
+        challenge: {
+            adminToken: process.env.CHALLENGE_ADMIN_TOKEN?.trim() || undefined,
         },
         logging: {
             level: loggingLevel,
