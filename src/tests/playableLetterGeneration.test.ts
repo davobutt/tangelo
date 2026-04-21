@@ -103,4 +103,12 @@ describe('playable letter generation', () => {
 
         expect(newRareCount).toBeLessThan(legacyRareCount);
     });
+
+    it('avoids collapsed repeated rows for the default challenge seed', () => {
+        const letters = generateBoard({ seed: 'lemon' }).map((tile) => tile.letter);
+        const firstTwoRows = letters.slice(0, 8);
+
+        expect(new Set(firstTwoRows).size).toBeGreaterThanOrEqual(4);
+        expect(firstTwoRows.join('')).not.toMatch(/^([A-Z])\1{7}$/);
+    });
 });

@@ -68,8 +68,18 @@ function hashString(input: string): number {
     return hash >>> 0;
 }
 
+function mixHash(value: number): number {
+    let mixed = value >>> 0;
+    mixed ^= mixed >>> 16;
+    mixed = Math.imul(mixed, 0x7feb352d);
+    mixed ^= mixed >>> 15;
+    mixed = Math.imul(mixed, 0x846ca68b);
+    mixed ^= mixed >>> 16;
+    return mixed >>> 0;
+}
+
 function hashToUnitInterval(input: string): number {
-    return hashString(input) / 0x100000000;
+    return mixHash(hashString(input)) / 0x100000000;
 }
 
 function weightedLetterFromUnit(unit: number): string {
