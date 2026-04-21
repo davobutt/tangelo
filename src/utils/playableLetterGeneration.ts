@@ -10,17 +10,21 @@ import { normalizeSeedCode } from './seedCode';
 
 const OPENING_SIZE = 4;
 const MAX_OPENING_ATTEMPTS = 12;
-const MAX_EXPANSION_ATTEMPTS = 6;
+const MAX_EXPANSION_ATTEMPTS = 10;
 const MAX_PLACEMENT_CANDIDATES = 48;
+const MAX_FREE_PLAY_LETTER_ATTEMPTS = 8;
 const MIN_OPENING_WORDS = 4;
 const MIN_OPENING_VOWELS = 4;
 const MAX_OPENING_VOWELS = 8;
 const MAX_OPENING_RARE_LETTERS = 2;
+const FREE_PLAY_WEIGHT_EXPONENT = 0.6;
 
 const VOWELS = new Set(['A', 'E', 'I', 'O', 'U', 'Y']);
 const RARE_LETTERS = new Set(['Q', 'J', 'X', 'Z']);
 
-const LETTER_WEIGHTS = [
+type LetterWeight = readonly [string, number];
+
+const LETTER_WEIGHTS: readonly LetterWeight[] = [
     ['E', 123],
     ['A', 82],
     ['R', 76],
@@ -49,7 +53,29 @@ const LETTER_WEIGHTS = [
     ['Z', 1],
 ] as const;
 
-const TOTAL_WEIGHT = LETTER_WEIGHTS.reduce((sum, [, weight]) => sum + weight, 0);
+function totalWeight(weights: readonly LetterWeight[]): number {
+    return weights.reduce((sum, [, weight]) => sum + weight, 0);
+}
+
+function buildWeightLookup(weights: readonly LetterWeight[]): ReadonlyMap<string, number> {
+    return new Map(weights);
+}
+
+function flattenWeights(weights: readonly LetterWeight[], exponent: number): LetterWeight[] {
+    return weights.map(([letter, weight]) => [
+        letter,
+        Math.max(isRareLetter(letter) ? 1 : 2, Math.round(weight ** exponent)),
+    ]);
+}
+
+const TOTAL_WEIGHT = totalWeight(LETTER_WEIGHTS);
+const LETTER_WEIGHT_LOOKUP = buildWeightLookup(LETTER_WEIGHTS);
+const FREE_PLAY_LETTER_WEIGHTS = flattenWeights(LETTER_WEIGHTS, FREE_PLAY_WEIGHT_EXPONENT);
+const FREE_PLAY_TOTAL_WEIGHT = totalWeight(FREE_PLAY_LETTER_WEIGHTS);
+const FREE_PLAY_WEIGHT_LOOKUP = buildWeightLookup(FREE_PLAY_LETTER_WEIGHTS);
+const FREE_PLAY_DUPLICATE_CAPS = new Map(
+    LETTER_WEIGHTS.filter(([, weight]) => weight >= 60).map(([letter]) => [letter, 2] as const),
+);
 
 interface SeededCoord {
     row: number;
@@ -110,10 +136,14 @@ function hashToUnitInterval(input: string): number {
     return mixHash(hashString(input)) / 0x100000000;
 }
 
-function weightedLetterFromUnit(unit: number): string {
-    let threshold = unit * TOTAL_WEIGHT;
+function weightedLetterFromUnit(
+    unit: number,
+    weights: readonly LetterWeight[],
+    total: number,
+): string {
+    let threshold = unit * total;
 
-    for (const [letter, weight] of LETTER_WEIGHTS) {
+    for (const [letter, weight] of weights) {
         if (threshold < weight) {
             return letter;
         }
@@ -123,12 +153,15 @@ function weightedLetterFromUnit(unit: number): string {
     return 'E';
 }
 
-function randomWeightedLetter(): string {
-    return weightedLetterFromUnit(Math.random());
+function randomWeightedLetter(
+    weights: readonly LetterWeight[] = LETTER_WEIGHTS,
+    total = TOTAL_WEIGHT,
+): string {
+    return weightedLetterFromUnit(Math.random(), weights, total);
 }
 
 function deterministicWeightedLetter(key: string): string {
-    return weightedLetterFromUnit(hashToUnitInterval(key));
+    return weightedLetterFromUnit(hashToUnitInterval(key), LETTER_WEIGHTS, TOTAL_WEIGHT);
 }
 
 function coordKey(row: number, col: number): string {
@@ -676,6 +709,42 @@ function selectBestOpeningLetters(candidates: string[][]): string[] {
     return bestLetters;
 }
 
+function getFreePlayDuplicateCap(letter: string): number {
+    return FREE_PLAY_DUPLICATE_CAPS.get(letter) ?? OPENING_SIZE;
+}
+
+function chooseFreePlayOpeningLetter(letterCounts: Map<string, number>): string {
+    let fallback = randomWeightedLetter(FREE_PLAY_LETTER_WEIGHTS, FREE_PLAY_TOTAL_WEIGHT);
+
+    for (let attempt = 0; attempt < MAX_FREE_PLAY_LETTER_ATTEMPTS; attempt += 1) {
+        const candidate = randomWeightedLetter(FREE_PLAY_LETTER_WEIGHTS, FREE_PLAY_TOTAL_WEIGHT);
+        fallback = candidate;
+
+        if ((letterCounts.get(candidate) ?? 0) < getFreePlayDuplicateCap(candidate)) {
+            return candidate;
+        }
+    }
+
+    const availableWeights = FREE_PLAY_LETTER_WEIGHTS.filter(
+        ([letter]) => (letterCounts.get(letter) ?? 0) < getFreePlayDuplicateCap(letter),
+    );
+    if (availableWeights.length > 0) {
+        return randomWeightedLetter(availableWeights, totalWeight(availableWeights));
+    }
+
+    return fallback;
+}
+
+function buildFreePlayOpeningLetters(): string[] {
+    const letterCounts = new Map<string, number>();
+
+    return Array.from({ length: OPENING_SIZE * OPENING_SIZE }, () => {
+        const letter = chooseFreePlayOpeningLetter(letterCounts);
+        letterCounts.set(letter, (letterCounts.get(letter) ?? 0) + 1);
+        return letter;
+    });
+}
+
 export function generateOpeningLetters(seed?: string): string[] {
     const curatedDefinition = getCuratedSeedDefinition(seed);
     const candidates: string[][] = [];
@@ -685,7 +754,7 @@ export function generateOpeningLetters(seed?: string): string[] {
             ? buildCuratedOpeningLetters(curatedDefinition, attempt)
             : seed
                 ? buildSeededOpeningLetters(seed, attempt)
-            : Array.from({ length: OPENING_SIZE * OPENING_SIZE }, () => randomWeightedLetter());
+                : buildFreePlayOpeningLetters();
         const assessment = assessOpeningBoard(buildOpeningTiles(letters));
         candidates.push(letters);
         if (assessment.passes) {
@@ -702,6 +771,10 @@ function countBoardVowels(tiles: TileData[]): number {
 
 function countBoardRareLetters(tiles: TileData[]): number {
     return tiles.filter((tile) => isRareLetter(tile.letter)).length;
+}
+
+function countLetterOnBoard(letter: string, tiles: TileData[]): number {
+    return tiles.filter((tile) => tile.letter === letter).length;
 }
 
 function countAdjacentRareNeighbors(
@@ -721,6 +794,19 @@ function countAdjacentRareNeighbors(
     ).length;
 }
 
+function countAdjacentMatchingNeighbors(
+    row: number,
+    col: number,
+    letter: string,
+    tiles: TileData[],
+): number {
+    return tiles.filter((tile) =>
+        tile.letter === letter &&
+        Math.abs(tile.row - row) <= 1 &&
+        Math.abs(tile.col - col) <= 1,
+    ).length;
+}
+
 function scoreExpansionCandidate(
     row: number,
     col: number,
@@ -731,12 +817,22 @@ function scoreExpansionCandidate(
     const nextVowelCount = countBoardVowels(tiles) + (isVowelLetter(letter) ? 1 : 0);
     const nextRareCount = countBoardRareLetters(tiles) + (isRareLetter(letter) ? 1 : 0);
     const vowelRatio = nextVowelCount / nextTileCount;
+    const currentLetterCount = countLetterOnBoard(letter, tiles);
     const rareNeighbors = countAdjacentRareNeighbors(row, col, letter, tiles);
+    const matchingNeighbors = countAdjacentMatchingNeighbors(row, col, letter, tiles);
+    const targetShare = (FREE_PLAY_WEIGHT_LOOKUP.get(letter) ?? 0) / FREE_PLAY_TOTAL_WEIGHT;
+    const targetCount = Math.max(1, Math.round(nextTileCount * targetShare + 0.35));
+    const overTargetCount = Math.max(0, currentLetterCount + 1 - targetCount);
+    const diversityBonus =
+        currentLetterCount === 0 ? 16 : currentLetterCount === 1 ? 6 : 0;
 
-    let score = LETTER_WEIGHTS.find(([candidate]) => candidate === letter)?.[1] ?? 0;
+    let score = FREE_PLAY_WEIGHT_LOOKUP.get(letter) ?? LETTER_WEIGHT_LOOKUP.get(letter) ?? 0;
     score -= Math.abs(vowelRatio - 0.42) * 120;
     score -= Math.max(0, nextRareCount - 2) * 20;
     score -= rareNeighbors * 40;
+    score -= overTargetCount * 36;
+    score -= matchingNeighbors * 20;
+    score += diversityBonus;
     return score;
 }
 
@@ -758,11 +854,11 @@ export function generateExpansionLetter(
         return getSeededLetter(seed, coord.row, coord.col);
     }
 
-    let bestLetter = randomWeightedLetter();
+    let bestLetter = randomWeightedLetter(FREE_PLAY_LETTER_WEIGHTS, FREE_PLAY_TOTAL_WEIGHT);
     let bestScore = scoreExpansionCandidate(coord.row, coord.col, bestLetter, tiles);
 
     for (let attempt = 1; attempt < MAX_EXPANSION_ATTEMPTS; attempt += 1) {
-        const candidate = randomWeightedLetter();
+        const candidate = randomWeightedLetter(FREE_PLAY_LETTER_WEIGHTS, FREE_PLAY_TOTAL_WEIGHT);
         const candidateScore = scoreExpansionCandidate(coord.row, coord.col, candidate, tiles);
         if (candidateScore > bestScore) {
             bestLetter = candidate;

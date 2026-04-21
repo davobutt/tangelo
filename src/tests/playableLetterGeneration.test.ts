@@ -4,6 +4,7 @@ import { generateBoard } from '../utils/boardGenerator';
 import { getSeededLetter } from '../utils/seededGeneration';
 import {
     assessOpeningBoard,
+    generateExpansionLetter,
     isRareLetter,
 } from '../utils/playableLetterGeneration';
 
@@ -38,12 +39,77 @@ function buildLegacySeededBoard(seed: string): TileData[] {
     });
 }
 
+function withMockedRandom<T>(seed: number, run: () => T): T {
+    const originalRandom = Math.random;
+    let state = seed >>> 0;
+    Math.random = () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state / 0x100000000;
+    };
+
+    try {
+        return run();
+    } finally {
+        Math.random = originalRandom;
+    }
+}
+
+function buildBoardFromLetters(letters: string[]): TileData[] {
+    return letters.map((letter, index) => ({
+        index,
+        row: Math.floor(index / 4),
+        col: index % 4,
+        letter,
+    }));
+}
+
 describe('playable letter generation', () => {
     it('keeps repeated unseeded opening boards within the playability guardrails', () => {
         for (let index = 0; index < 12; index += 1) {
             const assessment = assessOpeningBoard(generateBoard());
             expect(assessment.passes).toBe(true);
         }
+    });
+
+    it('caps dominant free-play letters so openings do not overload E and R', () => {
+        const boards = withMockedRandom(0x5eedc0de, () =>
+            Array.from({ length: 24 }, () => generateBoard().map((tile) => tile.letter)),
+        );
+
+        boards.forEach((letters) => {
+            const eCount = letters.filter((letter) => letter === 'E').length;
+            const rCount = letters.filter((letter) => letter === 'R').length;
+
+            expect(eCount).toBeLessThanOrEqual(2);
+            expect(rCount).toBeLessThanOrEqual(2);
+        });
+    });
+
+    it('steers free-play expansions away from letters already overrepresented on the board', () => {
+        const board = buildBoardFromLetters([
+            'E', 'A', 'T', 'R',
+            'H', 'E', 'A', 'T',
+            'R', 'H', 'E', 'A',
+            'T', 'R', 'H', 'E',
+        ]);
+
+        const generated = withMockedRandom(0x1badb002, () =>
+            Array.from({ length: 12 }, (_, index) => {
+                const coord = { row: 4 + Math.floor(index / 4), col: index % 4 };
+                const letter = generateExpansionLetter(board, coord);
+                board.push({
+                    index: board.length,
+                    row: coord.row,
+                    col: coord.col,
+                    letter,
+                });
+                return letter;
+            }),
+        );
+
+        const dominantCount = generated.filter((letter) => ['E', 'A', 'T', 'R', 'H'].includes(letter)).length;
+        expect(dominantCount).toBeLessThanOrEqual(5);
+        expect(new Set(generated).size).toBeGreaterThanOrEqual(6);
     });
 
     it('improves seeded opening-board playability across a representative deterministic sample', () => {
