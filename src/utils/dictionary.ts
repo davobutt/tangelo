@@ -6,9 +6,23 @@ export function normalizeWord(word: string): string {
 
 export class DictionaryService {
     private readonly words: Set<string>;
+    private readonly prefixes: Set<string>;
 
     constructor(words: Iterable<string>) {
-        this.words = new Set(words);
+        this.words = new Set();
+        this.prefixes = new Set();
+
+        for (const rawWord of words) {
+            const word = normalizeWord(rawWord);
+            if (!word) {
+                continue;
+            }
+
+            this.words.add(word);
+            for (let index = 1; index <= word.length; index += 1) {
+                this.prefixes.add(word.slice(0, index));
+            }
+        }
     }
 
     static fromWordList(wordListText: string): DictionaryService {
@@ -22,6 +36,10 @@ export class DictionaryService {
 
     has(word: string): boolean {
         return this.words.has(normalizeWord(word));
+    }
+
+    hasPrefix(prefix: string): boolean {
+        return this.prefixes.has(normalizeWord(prefix));
     }
 }
 

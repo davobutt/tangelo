@@ -26,6 +26,12 @@ describe('DictionaryService', () => {
         expect(dictionary.has('NEIGHBOUR')).toBe(true);
     });
 
+    it('supports prefix checks for generator heuristics', () => {
+        expect(dictionary.hasPrefix('co')).toBe(true);
+        expect(dictionary.hasPrefix('colo')).toBe(true);
+        expect(dictionary.hasPrefix('zzzx')).toBe(false);
+    });
+
     it('rejects unknown words', () => {
         expect(dictionary.has('zzzx')).toBe(false);
     });
@@ -44,5 +50,6 @@ describe('DictionaryService', () => {
         expect(fullDictionary.has('aa')).toBe(true);
         expect(fullDictionary.has('aardvark')).toBe(true);
         expect(fullDictionary.has('abacus')).toBe(true);
+        expect(fullDictionary.hasPrefix('aard')).toBe(true);
     });
 });

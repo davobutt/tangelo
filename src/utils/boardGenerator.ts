@@ -1,74 +1,18 @@
 import type { TileData } from '../models/Tile';
-import { getSeededLetter } from './seededGeneration';
-
-/**
- * Classic 4x4 dice set (16 dice, 6 faces each).
- * Each round: shuffle the dice, pick one random face per die, assign to board position.
- */
-const CLASSIC_DICE: string[][] = [
-    ['A', 'A', 'E', 'E', 'G', 'N'],
-    ['E', 'L', 'R', 'T', 'T', 'Y'],
-    ['A', 'O', 'O', 'T', 'T', 'W'],
-    ['A', 'B', 'B', 'J', 'O', 'O'],
-    ['E', 'H', 'R', 'T', 'V', 'W'],
-    ['C', 'I', 'M', 'O', 'T', 'U'],
-    ['D', 'I', 'S', 'T', 'T', 'Y'],
-    ['E', 'I', 'O', 'S', 'S', 'T'],
-    ['D', 'E', 'L', 'R', 'V', 'Y'],
-    ['A', 'C', 'H', 'O', 'P', 'S'],
-    ['H', 'I', 'M', 'N', 'Q', 'U'],
-    ['E', 'E', 'I', 'N', 'S', 'U'],
-    ['E', 'E', 'G', 'H', 'N', 'W'],
-    ['A', 'F', 'F', 'K', 'P', 'S'],
-    ['H', 'L', 'N', 'N', 'R', 'Z'],
-    ['D', 'E', 'I', 'L', 'R', 'X'],
-];
+import { generateOpeningLetters } from './playableLetterGeneration';
 
 export interface BoardGenerationOptions {
     seed?: string;
 }
 
-function randomInt(max: number): number {
-    return Math.floor(Math.random() * max);
-}
-
-/** Fisher-Yates shuffle (in-place) */
-function shuffle<T>(arr: T[]): T[] {
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = randomInt(i + 1);
-        const tmp = arr[i] as T;
-        arr[i] = arr[j] as T;
-        arr[j] = tmp;
-    }
-    return arr;
-}
-
 /**
  * Generates a 4×4 board in row-major order.
- * Unseeded boards use the classic dice set; seeded boards use coordinate-based letters.
+ * Seeded and unseeded boards use the shared playability-focused generation policy.
  */
 export function generateBoard(options: BoardGenerationOptions = {}): TileData[] {
-    const seed = options.seed;
-    if (seed) {
-        return Array.from({ length: 16 }, (_, position) => {
-            const row = Math.floor(position / 4);
-            const col = position % 4;
-            return {
-                index: position,
-                row,
-                col,
-                letter: getSeededLetter(seed, row, col),
-            };
-        });
-    }
-
-    const diceOrder = shuffle([...Array(16).keys()]); // permuted die indices
-
-    return diceOrder.map((dieIndex, position) => {
-        const die = CLASSIC_DICE[dieIndex] ?? CLASSIC_DICE[0]!;
-        const face = die[randomInt(6)] ?? 'A';
+    return generateOpeningLetters(options.seed).map((letter, position) => {
         const row = Math.floor(position / 4);
         const col = position % 4;
-        return { index: position, row, col, letter: face };
+        return { index: position, row, col, letter };
     });
 }
