@@ -62,7 +62,7 @@ const datastore = createDatastore(config.datastore.type, config.datastore.dbPath
 datastore.initialize();
 
 // Register API routes
-app.use('/api', createApiRouter(datastore));
+app.use('/api', createApiRouter(datastore, { adminToken: config.challenge.adminToken }));
 
 // 404 handler
 app.use((req, res) => {

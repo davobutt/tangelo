@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-    readonly VITE_SHARED_DAILY_SEED?: string;
     readonly VITE_LEADERBOARD_API_URL?: string;
 }
 

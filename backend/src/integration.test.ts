@@ -4,7 +4,10 @@
  */
 
 import { IDatastore, createDatastore } from './datastore.js';
-import { validateScoreSubmission } from './types.js';
+import {
+    createChallengeLeaderboardSeedKey,
+    validateScoreSubmission,
+} from './types.js';
 
 function testDatastoreOperations(): void {
     console.log('\n🧪 Testing datastore operations...');
@@ -110,6 +113,55 @@ function testDatastoreOperations(): void {
         throw new Error('Normal leaderboard should not include seeded or challenge entries');
     }
     console.log('    Seeded and challenge categories are isolated correctly');
+
+    // Test 8: Active challenge configuration is stored independently of score data
+    console.log('  ✓ Test 8: Active challenge configuration persists with separate leaderboard identity');
+    const initialChallenge = datastore.setActiveChallenge({
+        seedCode: 'apple',
+        leaderboardSeedKey: createChallengeLeaderboardSeedKey('apple', 101),
+        updatedAt: 101,
+    });
+    const loadedChallenge = datastore.getActiveChallenge();
+    if (!loadedChallenge) {
+        throw new Error('Expected an active challenge to be available after setting it');
+    }
+    if (loadedChallenge.seedCode !== initialChallenge.seedCode) {
+        throw new Error(`Expected active challenge seedCode ${initialChallenge.seedCode}, got ${loadedChallenge.seedCode}`);
+    }
+    if (loadedChallenge.leaderboardSeedKey !== initialChallenge.leaderboardSeedKey) {
+        throw new Error('Expected active challenge leaderboard identity to round-trip through the datastore');
+    }
+
+    // Test 9: Rotating the active challenge creates a distinct comparison set
+    console.log('  ✓ Test 9: Active challenge rotation creates a distinct leaderboard comparison set');
+    const rotatedChallenge = datastore.setActiveChallenge({
+        seedCode: 'apple',
+        leaderboardSeedKey: createChallengeLeaderboardSeedKey('apple', 202),
+        updatedAt: 202,
+    });
+    datastore.submitScore('player-5', 'Devon', 1600, {
+        runMode: 'challenge',
+        seedKey: initialChallenge.leaderboardSeedKey,
+    });
+    datastore.submitScore('player-6', 'Blair', 1750, {
+        runMode: 'challenge',
+        seedKey: rotatedChallenge.leaderboardSeedKey,
+    });
+    const originalChallengeLeaderboard = datastore.getLeaderboard(10, {
+        runMode: 'challenge',
+        seedKey: initialChallenge.leaderboardSeedKey,
+    });
+    const rotatedChallengeLeaderboard = datastore.getLeaderboard(10, {
+        runMode: 'challenge',
+        seedKey: rotatedChallenge.leaderboardSeedKey,
+    });
+    if (originalChallengeLeaderboard.length !== 1 || originalChallengeLeaderboard[0]?.playerGUID !== 'player-5') {
+        throw new Error('Expected original active challenge leaderboard to retain only its own submissions');
+    }
+    if (rotatedChallengeLeaderboard.length !== 1 || rotatedChallengeLeaderboard[0]?.playerGUID !== 'player-6') {
+        throw new Error('Expected rotated challenge leaderboard to be distinct from the prior active challenge');
+    }
+    console.log('    Active challenge rotation keeps leaderboard comparison sets isolated');
 
     datastore.close();
     console.log('  ✅ All datastore tests passed!\n');

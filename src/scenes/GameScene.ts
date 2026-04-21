@@ -21,7 +21,9 @@ import { scoreSubmission } from '../utils/scoring';
 import { UI_THEME, themeColorHex, uiTextStyles } from '../theme/uiTheme';
 import {
     fetchLeaderboard,
+    fetchActiveChallenge,
     submitLeaderboardScore,
+    type ActiveChallenge,
     type LeaderboardEntry,
 } from '../utils/leaderboardClient';
 import { resolveRunContext, type LaunchMode, type RunContext } from '../utils/runContext';
@@ -131,6 +133,8 @@ export class GameScene extends Phaser.Scene {
     private restartButton!: UIButton;
     private leaderboardButton!: UIButton;
     private startOverlay: Phaser.GameObjects.Container | null = null;
+    private startGateStatusText: Phaser.GameObjects.Text | null = null;
+    private startGateChallengeButton: UIButton | null = null;
     private profileOverlay: Phaser.GameObjects.Container | null = null;
     private codeEntryOverlay: Phaser.GameObjects.Container | null = null;
     private leaderboardOverlay: Phaser.GameObjects.Container | null = null;
@@ -147,8 +151,10 @@ export class GameScene extends Phaser.Scene {
 
     private highScoreStore: HighScoreStore = createHighScoreStore();
     private highScore = 0;
+    private activeChallenge: ActiveChallenge | null = null;
     private activeRunSeed: string | null = null;
     private activeRunContext: RunContext = resolveRunContext();
+    private challengeLaunchInFlight = false;
     private tileLetterColors = new Map<number, number>();
     private boardMinRow = 0;
     private boardMinCol = 0;
@@ -263,14 +269,13 @@ export class GameScene extends Phaser.Scene {
             0.72,
         );
 
-        const panel = this.add.rectangle(GAME_W / 2, GAME_H / 2 - 4, GAME_W - 72, 304, UI_THEME.palette.surfaceBase, 0.95);
+        const panel = this.add.rectangle(GAME_W / 2, GAME_H / 2 + 8, GAME_W - 72, 336, UI_THEME.palette.surfaceBase, 0.95);
 
         const heading = this.add
             .text(GAME_W / 2, GAME_H / 2 - 126, 'CHOOSE MODE', uiTextStyles.title())
             .setOrigin(0.5)
             .setScale(0.8);
 
-        const sharedChallengeSeed = this.getSharedChallengeSeed();
         const body = this.add
             .text(
                 GAME_W / 2,
@@ -303,16 +308,22 @@ export class GameScene extends Phaser.Scene {
             GAME_W / 2,
             GAME_H / 2 + 58,
             'CHALLENGE',
-            () => {
-                this.selectLaunchMode('challenge');
-                this.enterRoundFromGate();
-            },
+            () => void this.launchActiveChallenge(),
             UI_THEME.palette.accentAlt,
             {
                 width: 220,
             },
         );
-        this.setButtonEnabled(challengeButton, Boolean(sharedChallengeSeed));
+
+        const statusText = this.add
+            .text(GAME_W / 2, GAME_H / 2 + 156, '', {
+                ...uiTextStyles.body(),
+                align: 'center',
+                fontSize: '12px',
+                wordWrap: { width: 260 },
+            })
+            .setOrigin(0.5);
+        statusText.setColor(themeColorHex(UI_THEME.palette.textMuted));
 
         const enterCodeButton = this.makeButton(
             GAME_W / 2,
@@ -333,9 +344,12 @@ export class GameScene extends Phaser.Scene {
             freePlayButton.container,
             challengeButton.container,
             enterCodeButton.container,
+            statusText,
         ]);
         this.startOverlay.setDepth(200);
         this.startOverlay.setAlpha(0);
+        this.startGateStatusText = statusText;
+        this.startGateChallengeButton = challengeButton;
 
         this.tweens.add({
             targets: this.startOverlay,
@@ -353,6 +367,8 @@ export class GameScene extends Phaser.Scene {
 
         const overlay = this.startOverlay;
         this.startOverlay = null;
+        this.startGateStatusText = null;
+        this.startGateChallengeButton = null;
 
         this.tweens.add({
             targets: overlay,
@@ -688,18 +704,59 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    private getSharedChallengeSeed(): string | null {
-        const sharedSeed = import.meta.env.VITE_SHARED_DAILY_SEED;
-        return typeof sharedSeed === 'string' && sharedSeed.trim().length > 0 ? sharedSeed.trim() : null;
+    private setStartGateStatus(message: string, color: number = UI_THEME.palette.textMuted): void {
+        if (!this.startGateStatusText) {
+            return;
+        }
+
+        this.startGateStatusText.setText(message);
+        this.startGateStatusText.setColor(themeColorHex(color));
+    }
+
+    private setStartGateChallengeLoading(loading: boolean): void {
+        if (!this.startGateChallengeButton) {
+            return;
+        }
+
+        this.startGateChallengeButton.label.setText(loading ? 'LOADING...' : 'CHALLENGE');
+        this.setButtonEnabled(this.startGateChallengeButton, !loading);
+    }
+
+    private async launchActiveChallenge(): Promise<void> {
+        if (this.challengeLaunchInFlight) {
+            return;
+        }
+
+        this.challengeLaunchInFlight = true;
+        this.setStartGateStatus('Loading the active challenge...', UI_THEME.palette.textMuted);
+        this.setStartGateChallengeLoading(true);
+
+        const result = await fetchActiveChallenge();
+
+        this.challengeLaunchInFlight = false;
+        this.setStartGateChallengeLoading(false);
+
+        if (!result.ok || !result.activeChallenge) {
+            this.setStartGateStatus(
+                `Challenge unavailable. ${result.error ?? 'Check the backend connection and try again.'}`,
+                UI_THEME.palette.danger,
+            );
+            return;
+        }
+
+        this.activeChallenge = result.activeChallenge;
+        this.setStartGateStatus('', UI_THEME.palette.textMuted);
+        this.selectLaunchMode('challenge');
+        this.enterRoundFromGate();
     }
 
     private syncRunContext(): void {
         this.activeRunContext = resolveRunContext({
             launchMode: this.registry.get(RUN_LAUNCH_MODE_REGISTRY_KEY),
             manualSeed: this.registry.get(RUN_SEED_REGISTRY_KEY),
-            sharedSeed: this.getSharedChallengeSeed() ?? undefined,
+            activeChallenge: this.activeChallenge,
         });
-        this.activeRunSeed = this.activeRunContext.seedKey;
+        this.activeRunSeed = this.activeRunContext.boardSeed;
         this.highScoreStore = createHighScoreStore(undefined, this.activeRunContext.highScoreStorageKey);
         this.highScore = this.highScoreStore.get();
         this.modeText?.setText(this.activeRunContext.modeLabel);
@@ -863,7 +920,9 @@ export class GameScene extends Phaser.Scene {
             displayName: this.playerProfile.displayName,
             score,
             runMode: this.activeRunContext.mode,
-            ...(this.activeRunContext.seedKey ? { seedKey: this.activeRunContext.seedKey } : {}),
+            ...(this.activeRunContext.leaderboardSeedKey
+                ? { seedKey: this.activeRunContext.leaderboardSeedKey }
+                : {}),
         } as const;
 
         void submitLeaderboardScore(payload).then((result) => {
@@ -1066,8 +1125,8 @@ export class GameScene extends Phaser.Scene {
         this.leaderboardStatusText.setColor(themeColorHex(UI_THEME.palette.textMuted));
         this.leaderboardEntriesText.setText('');
 
-        const response = await fetchLeaderboard(20, this.activeRunContext.seedKey
-            ? { runMode: this.activeRunContext.mode, seedKey: this.activeRunContext.seedKey }
+        const response = await fetchLeaderboard(20, this.activeRunContext.leaderboardSeedKey
+            ? { runMode: this.activeRunContext.mode, seedKey: this.activeRunContext.leaderboardSeedKey }
             : { runMode: this.activeRunContext.mode });
         if (!this.leaderboardStatusText || !this.leaderboardEntriesText) {
             return;
