@@ -1,9 +1,12 @@
 import type { TileData } from '../models/Tile';
-import { fullDictionary } from './dictionary';
+import { CURATED_SEED_DEFINITIONS, type CuratedSeedDefinition } from './curatedSeedConfig';
+import { fullDictionary, normalizeWord } from './dictionary';
+import { normalizeSeedCode } from './seedCode';
 
 const OPENING_SIZE = 4;
 const MAX_OPENING_ATTEMPTS = 12;
 const MAX_EXPANSION_ATTEMPTS = 6;
+const MAX_PLACEMENT_CANDIDATES = 48;
 const MIN_OPENING_WORDS = 4;
 const MIN_OPENING_VOWELS = 4;
 const MAX_OPENING_VOWELS = 8;
@@ -48,6 +51,12 @@ interface SeededCoord {
     col: number;
 }
 
+interface CuratedWordPlacement {
+    word: string;
+    path: SeededCoord[];
+    score: number;
+}
+
 export interface OpeningBoardAssessment {
     playableWordCount: number;
     vowelCount: number;
@@ -55,6 +64,12 @@ export interface OpeningBoardAssessment {
     adjacentRarePairCount: number;
     score: number;
     passes: boolean;
+}
+
+interface ValidatedCuratedSeedDefinition extends CuratedSeedDefinition {
+    seed: string;
+    theme: string;
+    hiddenWords: readonly string[];
 }
 
 function hashString(input: string): number {
@@ -101,6 +116,285 @@ function randomWeightedLetter(): string {
 
 function deterministicWeightedLetter(key: string): string {
     return weightedLetterFromUnit(hashToUnitInterval(key));
+}
+
+function coordKey(row: number, col: number): string {
+    return `${row},${col}`;
+}
+
+function openingCoordIndex(row: number, col: number): number {
+    return row * OPENING_SIZE + col;
+}
+
+function listOpeningCoords(): SeededCoord[] {
+    return Array.from({ length: OPENING_SIZE * OPENING_SIZE }, (_, index) => ({
+        row: Math.floor(index / OPENING_SIZE),
+        col: index % OPENING_SIZE,
+    }));
+}
+
+const OPENING_COORDS = listOpeningCoords();
+
+function getOpeningNeighbors(coord: SeededCoord): SeededCoord[] {
+    return OPENING_COORDS.filter((candidate) =>
+        !(candidate.row === coord.row && candidate.col === coord.col) &&
+        Math.abs(candidate.row - coord.row) <= 1 &&
+        Math.abs(candidate.col - coord.col) <= 1,
+    );
+}
+
+function scoreCoordForLetter(
+    coord: SeededCoord,
+    letter: string,
+    assignments: Map<string, string>,
+    baseLetters: string[],
+): number {
+    const key = coordKey(coord.row, coord.col);
+    const assignedLetter = assignments.get(key);
+    if (assignedLetter && assignedLetter !== letter) {
+        return Number.NEGATIVE_INFINITY;
+    }
+
+    const baseLetter = baseLetters[openingCoordIndex(coord.row, coord.col)];
+    let score = 0;
+    if (assignedLetter === letter) {
+        score += 18;
+    }
+    if (baseLetter === letter) {
+        score += 12;
+    }
+
+    const centerDistance = Math.abs(coord.row - 1.5) + Math.abs(coord.col - 1.5);
+    score -= centerDistance;
+    return score;
+}
+
+function compareCoords(a: SeededCoord, b: SeededCoord): number {
+    return a.row - b.row || a.col - b.col;
+}
+
+function findWordPlacementCandidates(
+    word: string,
+    assignments: Map<string, string>,
+    baseLetters: string[],
+): CuratedWordPlacement[] {
+    const placements: CuratedWordPlacement[] = [];
+
+    const visit = (
+        coord: SeededCoord,
+        index: number,
+        path: SeededCoord[],
+        visitedInWord: Set<string>,
+        score: number,
+    ): void => {
+        if (placements.length >= MAX_PLACEMENT_CANDIDATES) {
+            return;
+        }
+
+        if (index === word.length - 1) {
+            placements.push({ word, path: [...path], score });
+            return;
+        }
+
+        const nextLetter = word[index + 1] ?? '';
+        const nextCoords = getOpeningNeighbors(coord)
+            .filter((candidate) => !visitedInWord.has(coordKey(candidate.row, candidate.col)))
+            .map((candidate) => ({
+                coord: candidate,
+                score: scoreCoordForLetter(candidate, nextLetter, assignments, baseLetters),
+            }))
+            .filter((candidate) => Number.isFinite(candidate.score))
+            .sort((a, b) => b.score - a.score || compareCoords(a.coord, b.coord));
+
+        for (const candidate of nextCoords) {
+            const key = coordKey(candidate.coord.row, candidate.coord.col);
+            visitedInWord.add(key);
+            path.push(candidate.coord);
+            visit(candidate.coord, index + 1, path, visitedInWord, score + candidate.score);
+            path.pop();
+            visitedInWord.delete(key);
+        }
+    };
+
+    const firstLetter = word[0] ?? '';
+    const starts = OPENING_COORDS
+        .map((coord) => ({
+            coord,
+            score: scoreCoordForLetter(coord, firstLetter, assignments, baseLetters),
+        }))
+        .filter((candidate) => Number.isFinite(candidate.score))
+        .sort((a, b) => b.score - a.score || compareCoords(a.coord, b.coord));
+
+    for (const candidate of starts) {
+        const key = coordKey(candidate.coord.row, candidate.coord.col);
+        visit(candidate.coord, 0, [candidate.coord], new Set([key]), candidate.score);
+    }
+
+    return placements.sort((a, b) => b.score - a.score || compareCoords(a.path[0] ?? { row: 0, col: 0 }, b.path[0] ?? { row: 0, col: 0 }));
+}
+
+function buildAssignmentsFromPlacements(placements: CuratedWordPlacement[]): Map<string, string> {
+    const assignments = new Map<string, string>();
+
+    for (const placement of placements) {
+        placement.path.forEach((coord, index) => {
+            const letter = placement.word[index] ?? '';
+            assignments.set(coordKey(coord.row, coord.col), letter);
+        });
+    }
+
+    return assignments;
+}
+
+function overlayAssignments(baseLetters: string[], assignments: Map<string, string>): string[] {
+    return baseLetters.map((letter, index) => {
+        const row = Math.floor(index / OPENING_SIZE);
+        const col = index % OPENING_SIZE;
+        return assignments.get(coordKey(row, col)) ?? letter;
+    });
+}
+
+function containsWordPath(letters: string[], word: string): boolean {
+    const tiles = buildOpeningTiles(letters);
+    const visited = new Set<number>();
+
+    const dfs = (tileIndex: number, depth: number): boolean => {
+        if ((tiles[tileIndex]?.letter ?? '') !== (word[depth] ?? '')) {
+            return false;
+        }
+
+        if (depth === word.length - 1) {
+            return true;
+        }
+
+        visited.add(tileIndex);
+        const tile = tiles[tileIndex];
+        const found = tile
+            ? tiles.some((candidate, candidateIndex) => {
+                if (visited.has(candidateIndex)) {
+                    return false;
+                }
+                return (
+                    Math.abs(candidate.row - tile.row) <= 1 &&
+                    Math.abs(candidate.col - tile.col) <= 1 &&
+                    !(candidate.row === tile.row && candidate.col === tile.col) &&
+                    dfs(candidateIndex, depth + 1)
+                );
+            })
+            : false;
+        visited.delete(tileIndex);
+        return found;
+    };
+
+    return tiles.some((_, index) => dfs(index, 0));
+}
+
+function placeCuratedWordsOnBoard(
+    hiddenWords: readonly string[],
+    baseLetters: string[],
+): CuratedWordPlacement[] | null {
+    const sortedWords = [...hiddenWords].sort((a, b) => b.length - a.length || a.localeCompare(b));
+
+    const search = (
+        wordIndex: number,
+        placements: CuratedWordPlacement[],
+    ): CuratedWordPlacement[] | null => {
+        if (wordIndex >= sortedWords.length) {
+            return placements;
+        }
+
+        const word = sortedWords[wordIndex] ?? '';
+        const assignments = buildAssignmentsFromPlacements(placements);
+        const candidates = findWordPlacementCandidates(word, assignments, baseLetters);
+
+        for (const candidate of candidates) {
+            const nextPlacements = [...placements, candidate];
+            const result = search(wordIndex + 1, nextPlacements);
+            if (result) {
+                return result;
+            }
+        }
+
+        return null;
+    };
+
+    return search(0, []);
+}
+
+function buildCuratedOpeningLetters(
+    definition: ValidatedCuratedSeedDefinition,
+    attempt: number,
+): string[] {
+    const baseLetters = buildSeededOpeningLetters(definition.seed, attempt);
+    const placements = placeCuratedWordsOnBoard(definition.hiddenWords, baseLetters);
+    if (!placements) {
+        throw new Error(
+            `Curated seed "${definition.seed}" cannot place hidden words: ${definition.hiddenWords.join(', ')}`,
+        );
+    }
+
+    return overlayAssignments(baseLetters, buildAssignmentsFromPlacements(placements));
+}
+
+export function validateCuratedSeedDefinitions(
+    definitions: readonly CuratedSeedDefinition[],
+): ValidatedCuratedSeedDefinition[] {
+    const seenSeeds = new Set<string>();
+
+    return definitions.map((definition) => {
+        const seed = normalizeSeedCode(definition.seed);
+        if (!seed) {
+            throw new Error(`Curated seed "${definition.seed}" must use a valid 5-letter code.`);
+        }
+        if (seenSeeds.has(seed)) {
+            throw new Error(`Curated seed "${seed}" is defined more than once.`);
+        }
+        seenSeeds.add(seed);
+
+        if (!definition.theme.trim()) {
+            throw new Error(`Curated seed "${seed}" must include a non-empty theme.`);
+        }
+        if (definition.hiddenWords.length === 0) {
+            throw new Error(`Curated seed "${seed}" must define at least one hidden word.`);
+        }
+
+        const hiddenWords = definition.hiddenWords.map((word) => normalizeWord(word));
+        hiddenWords.forEach((word) => {
+            if (word.length < 3) {
+                throw new Error(`Curated seed "${seed}" contains hidden word "${word}" that is too short.`);
+            }
+            if (!fullDictionary.has(word)) {
+                throw new Error(`Curated seed "${seed}" contains hidden word "${word}" that is not in the dictionary.`);
+            }
+        });
+
+        const validatedDefinition: ValidatedCuratedSeedDefinition = {
+            seed,
+            theme: definition.theme.trim(),
+            hiddenWords,
+        };
+
+        const letters = buildCuratedOpeningLetters(validatedDefinition, 0);
+        hiddenWords.forEach((word) => {
+            if (!containsWordPath(letters, word)) {
+                throw new Error(`Curated seed "${seed}" failed to embed hidden word "${word}".`);
+            }
+        });
+
+        return validatedDefinition;
+    });
+}
+
+const CURATED_SEEDS = new Map(
+    validateCuratedSeedDefinitions(CURATED_SEED_DEFINITIONS).map((definition) => [definition.seed, definition]),
+);
+
+function getCuratedSeedDefinition(seed: string | undefined): ValidatedCuratedSeedDefinition | null {
+    if (!seed) {
+        return null;
+    }
+
+    return CURATED_SEEDS.get(seed.trim().toLowerCase()) ?? null;
 }
 
 export function isVowelLetter(letter: string): boolean {
@@ -259,11 +553,14 @@ function selectBestOpeningLetters(candidates: string[][]): string[] {
 }
 
 export function generateOpeningLetters(seed?: string): string[] {
+    const curatedDefinition = getCuratedSeedDefinition(seed);
     const candidates: string[][] = [];
 
     for (let attempt = 0; attempt < MAX_OPENING_ATTEMPTS; attempt += 1) {
-        const letters = seed
-            ? buildSeededOpeningLetters(seed, attempt)
+        const letters = curatedDefinition
+            ? buildCuratedOpeningLetters(curatedDefinition, attempt)
+            : seed
+                ? buildSeededOpeningLetters(seed, attempt)
             : Array.from({ length: OPENING_SIZE * OPENING_SIZE }, () => randomWeightedLetter());
         const assessment = assessOpeningBoard(buildOpeningTiles(letters));
         candidates.push(letters);
