@@ -262,7 +262,7 @@ export class GameScene extends Phaser.Scene {
             0.72,
         );
 
-        const panel = this.add.rectangle(GAME_W / 2, GAME_H / 2 - 4, GAME_W - 72, 312, UI_THEME.palette.surfaceBase, 0.95);
+        const panel = this.add.rectangle(GAME_W / 2, GAME_H / 2 - 4, GAME_W - 72, 304, UI_THEME.palette.surfaceBase, 0.95);
 
         const heading = this.add
             .text(GAME_W / 2, GAME_H / 2 - 126, 'CHOOSE MODE', uiTextStyles.title())
@@ -273,15 +273,8 @@ export class GameScene extends Phaser.Scene {
         const body = this.add
             .text(
                 GAME_W / 2,
-                GAME_H / 2 - 84,
-                [
-                    `Current mode: ${this.activeRunContext.modeLabel}`,
-                    'Find words. Grow the board.',
-                    'Pick Free Play, Challenge, or Enter Code.',
-                    sharedChallengeSeed
-                        ? 'Challenge uses the current shared seeded board.'
-                        : 'Challenge is unavailable until a shared seed is configured.',
-                ].join('\n'),
+                GAME_H / 2 - 74,
+                'Find words. Grow the board.\nPick Free Play, Challenge, or Enter Code.',
                 {
                     ...uiTextStyles.body(),
                     align: 'center',
@@ -388,7 +381,7 @@ export class GameScene extends Phaser.Scene {
             GAME_W / 2,
             GAME_H / 2,
             GAME_W - 88,
-            252,
+            220,
             UI_THEME.palette.surfaceBase,
             0.97,
         );
@@ -401,82 +394,93 @@ export class GameScene extends Phaser.Scene {
             .setOrigin(0.5)
             .setScale(0.8);
 
-        const hint = this.add
-            .text(
-                GAME_W / 2,
-                GAME_H / 2 - 46,
-                'Start a deterministic seeded run.\nEnter a custom code to replay the same board.',
-                {
+        const codeBoxY = GAME_H / 2 - 12;
+        const codeBoxSize = 40;
+        const codeBoxGap = 12;
+        const totalCodeWidth = codeBoxSize * 5 + codeBoxGap * 4;
+        const firstCodeX = GAME_W / 2 - totalCodeWidth / 2 + codeBoxSize / 2;
+        const codeBoxes: Array<{ box: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
+
+        for (let index = 0; index < 5; index++) {
+            const x = firstCodeX + index * (codeBoxSize + codeBoxGap);
+            const box = this.add.rectangle(
+                x,
+                codeBoxY,
+                codeBoxSize,
+                codeBoxSize,
+                UI_THEME.palette.surfaceMuted,
+                0.72,
+            );
+            box.setStrokeStyle(1, UI_THEME.palette.borderSoft, 0.5);
+
+            const text = this.add
+                .text(x, codeBoxY, '', {
                     ...uiTextStyles.body(),
-                    fontSize: '12px',
-                    align: 'center',
-                    lineSpacing: 4,
-                },
-            )
-            .setOrigin(0.5)
-            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+                    fontSize: '20px',
+                })
+                .setOrigin(0.5)
+                .setColor(themeColorHex(UI_THEME.palette.textStrong));
 
-        const errorText = this.add
-            .text(GAME_W / 2, GAME_H / 2 + 8, '', {
-                ...uiTextStyles.body(),
-                fontSize: '12px',
-                align: 'center',
-            })
-            .setOrigin(0.5)
-            .setColor(themeColorHex(UI_THEME.palette.danger));
+            codeBoxes.push({ box, text });
+        }
 
-        const inputBox = this.add.rectangle(
-            GAME_W / 2,
-            GAME_H / 2 - 16,
-            GAME_W - 152,
-            42,
-            UI_THEME.palette.surfaceMuted,
-            0.65,
-        );
-        inputBox.setStrokeStyle(1, UI_THEME.palette.borderSoft, 0.5);
+        const sanitizeCodeValue = (value: string): string =>
+            value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
 
-        const inputText = this.add
-            .text(GAME_W / 2, GAME_H / 2 - 16, '', {
-                ...uiTextStyles.body(),
-                fontSize: '18px',
-            })
-            .setOrigin(0.5)
-            .setColor(themeColorHex(UI_THEME.palette.textStrong));
+        const updateCodeBoxes = (value: string): void => {
+            const activeIndex = Math.min(value.length, 4);
+            codeBoxes.forEach(({ box, text }, index) => {
+                const char = value[index] ?? '';
+                text.setText(char);
+                box.setStrokeStyle(
+                    1,
+                    index === activeIndex && value.length < 5 ? UI_THEME.palette.accent : UI_THEME.palette.borderSoft,
+                    index === activeIndex && value.length < 5 ? 0.95 : 0.5,
+                );
+                box.setFillStyle(UI_THEME.palette.surfaceMuted, char ? 0.9 : 0.72);
+            });
+        };
 
         let startButton: UIButton | null = null;
+        const initialCode = '';
         const { inputField, focus, cleanup } = this.createOverlayTextInput({
             centerX: GAME_W / 2,
-            centerY: GAME_H / 2 - 16,
-            width: GAME_W - 152,
-            height: 42,
-            initialValue: this.activeRunContext.launchMode === 'enter-code' ? this.activeRunContext.seedKey ?? '' : '',
-            placeholder: 'Enter a seed...',
-            maxLength: 24,
+            centerY: codeBoxY,
+            width: totalCodeWidth,
+            height: codeBoxSize,
+            initialValue: initialCode,
+            maxLength: 5,
             ariaLabel: 'Seed code',
             autocomplete: 'off',
             autocapitalize: 'characters',
             onInput: (value) => {
-                inputText.setText(value);
-                errorText.setText('');
+                const normalizedValue = sanitizeCodeValue(value);
+                if (inputField.value !== normalizedValue) {
+                    inputField.value = normalizedValue;
+                }
+                updateCodeBoxes(normalizedValue);
                 if (startButton) {
-                    this.setButtonEnabled(startButton, value.trim().length > 0);
+                    this.setButtonEnabled(startButton, normalizedValue.length === 5);
                 }
             },
-            onEnter: () => startButton?.onClick(),
+            onEnter: () => {
+                if (inputField.value.length === 5) {
+                    startButton?.onClick();
+                }
+            },
         });
 
         startButton = this.makeButton(
             GAME_W / 2 - 70,
-            GAME_H / 2 + 72,
+            GAME_H / 2 + 62,
             'START',
             () => {
-                const nextSeed = inputField.value.trim();
-                if (nextSeed.length === 0) {
-                    errorText.setText('Enter a code to start a seeded run.');
+                const nextCode = sanitizeCodeValue(inputField.value);
+                if (nextCode.length !== 5) {
                     return;
                 }
 
-                this.selectLaunchMode('enter-code', nextSeed);
+                this.selectLaunchMode('enter-code', nextCode.toLowerCase());
                 this.codeEntryOverlay?.destroy(true);
                 this.codeEntryOverlay = null;
                 this.enterRoundFromGate();
@@ -488,12 +492,11 @@ export class GameScene extends Phaser.Scene {
                 fontSize: 12,
             },
         );
-        inputText.setText(inputField.value);
-        this.setButtonEnabled(startButton, inputField.value.trim().length > 0);
+        this.setButtonEnabled(startButton, inputField.value.length === 5);
 
         const cancelButton = this.makeButton(
             GAME_W / 2 + 70,
-            GAME_H / 2 + 72,
+            GAME_H / 2 + 62,
             'CANCEL',
             () => {
                 this.codeEntryOverlay?.destroy(true);
@@ -511,16 +514,15 @@ export class GameScene extends Phaser.Scene {
             blocker,
             panel,
             title,
-            hint,
-            inputBox,
-            inputText,
-            errorText,
+            ...codeBoxes.flatMap(({ box, text }) => [box, text]),
             startButton.container,
             cancelButton.container,
         ]);
         this.codeEntryOverlay.setDepth(220);
         this.codeEntryOverlay.setAlpha(0);
         this.codeEntryOverlay.once('destroy', cleanup);
+
+        updateCodeBoxes(initialCode);
 
         this.tweens.add({
             targets: this.codeEntryOverlay,
