@@ -24,7 +24,7 @@ import {
     submitLeaderboardScore,
     type LeaderboardEntry,
 } from '../utils/leaderboardClient';
-import { resolveRunContext, type RunContext } from '../utils/runContext';
+import { resolveRunContext, type LaunchMode, type RunContext } from '../utils/runContext';
 import {
     loadPlayerProfile,
     savePlayerProfile,
@@ -91,6 +91,9 @@ const HUD_LAYOUT = {
     },
 };
 
+const RUN_SEED_REGISTRY_KEY = 'runSeed';
+const RUN_LAUNCH_MODE_REGISTRY_KEY = 'launchMode';
+
 type UIButton = {
     container: Phaser.GameObjects.Container;
     bg: Phaser.GameObjects.Rectangle;
@@ -119,6 +122,7 @@ export class GameScene extends Phaser.Scene {
     private timerText!: Phaser.GameObjects.Text;
     private scoreText!: Phaser.GameObjects.Text;
     private highScoreText!: Phaser.GameObjects.Text;
+    private modeText!: Phaser.GameObjects.Text;
     private currentWordText!: Phaser.GameObjects.Text;
     private feedbackText!: Phaser.GameObjects.Text;
     private wordListText!: Phaser.GameObjects.Text;
@@ -127,6 +131,7 @@ export class GameScene extends Phaser.Scene {
     private leaderboardButton!: UIButton;
     private startOverlay: Phaser.GameObjects.Container | null = null;
     private profileOverlay: Phaser.GameObjects.Container | null = null;
+    private codeEntryOverlay: Phaser.GameObjects.Container | null = null;
     private leaderboardOverlay: Phaser.GameObjects.Container | null = null;
     private settingsOverlay: Phaser.GameObjects.Container | null = null;
     private leaderboardStatusText: Phaser.GameObjects.Text | null = null;
@@ -170,13 +175,8 @@ export class GameScene extends Phaser.Scene {
 
         this.pathGraphics = this.add.graphics();
 
-        this.activeRunContext = resolveRunContext({
-            manualSeed: this.registry.get('runSeed'),
-            sharedSeed: import.meta.env.VITE_SHARED_DAILY_SEED,
-        });
-        this.activeRunSeed = this.activeRunContext.seedKey;
-        this.highScoreStore = createHighScoreStore(undefined, this.activeRunContext.highScoreStorageKey);
-        this.highScore = this.highScoreStore.get();
+        this.ensureLaunchSelection();
+        this.syncRunContext();
 
         this.buildHUD();
 
@@ -198,13 +198,7 @@ export class GameScene extends Phaser.Scene {
         this.clearBoardObjects();
 
         // Fresh state
-        this.activeRunContext = resolveRunContext({
-            manualSeed: this.registry.get('runSeed'),
-            sharedSeed: import.meta.env.VITE_SHARED_DAILY_SEED,
-        });
-        this.activeRunSeed = this.activeRunContext.seedKey;
-        this.highScoreStore = createHighScoreStore(undefined, this.activeRunContext.highScoreStorageKey);
-        this.highScore = this.highScoreStore.get();
+        this.syncRunContext();
         const tiles = this.activeRunSeed
             ? generateBoard({ seed: this.activeRunSeed })
             : generateBoard();
@@ -235,7 +229,10 @@ export class GameScene extends Phaser.Scene {
         this.timerEvent?.remove(false);
         this.pathGraphics.clear();
         this.clearBoardObjects();
+        this.codeEntryOverlay?.destroy(true);
+        this.codeEntryOverlay = null;
         this.roundHasStarted = false;
+        this.syncRunContext();
 
         if (this.roundState) {
             this.roundState.status = 'ended';
@@ -265,42 +262,84 @@ export class GameScene extends Phaser.Scene {
             0.72,
         );
 
-        const panel = this.add.rectangle(
-            GAME_W / 2,
-            GAME_H / 2 - 20,
-            GAME_W - 72,
-            230,
-            UI_THEME.palette.surfaceBase,
-            0.95,
-        );
+        const panel = this.add.rectangle(GAME_W / 2, GAME_H / 2 - 4, GAME_W - 72, 312, UI_THEME.palette.surfaceBase, 0.95);
 
         const heading = this.add
-            .text(GAME_W / 2, GAME_H / 2 - 92, 'START ROUND', uiTextStyles.title())
+            .text(GAME_W / 2, GAME_H / 2 - 126, 'CHOOSE MODE', uiTextStyles.title())
             .setOrigin(0.5)
             .setScale(0.8);
 
+        const sharedChallengeSeed = this.getSharedChallengeSeed();
         const body = this.add
             .text(
                 GAME_W / 2,
-                GAME_H / 2 - 34,
-                'Find words. Grow the board.\nEach expanded edge adds 2x word score.',
+                GAME_H / 2 - 84,
+                [
+                    `Current mode: ${this.activeRunContext.modeLabel}`,
+                    'Find words. Grow the board.',
+                    'Pick Free Play, Challenge, or Enter Code.',
+                    sharedChallengeSeed
+                        ? 'Challenge uses the current shared seeded board.'
+                        : 'Challenge is unavailable until a shared seed is configured.',
+                ].join('\n'),
                 {
                     ...uiTextStyles.body(),
                     align: 'center',
-                    lineSpacing: 5,
+                    lineSpacing: 4,
+                    fontSize: '13px',
                 },
             )
             .setOrigin(0.5);
 
-        const startButton = this.makeButton(
+        const freePlayButton = this.makeButton(
             GAME_W / 2,
-            GAME_H / 2 + 42,
-            'START GAME',
-            () => this.enterRoundFromGate(),
+            GAME_H / 2 + 6,
+            'FREE PLAY',
+            () => {
+                this.selectLaunchMode('free-play');
+                this.enterRoundFromGate();
+            },
             UI_THEME.palette.accent,
+            {
+                width: 220,
+            },
         );
 
-        this.startOverlay = this.add.container(0, 0, [blocker, panel, heading, body, startButton.container]);
+        const challengeButton = this.makeButton(
+            GAME_W / 2,
+            GAME_H / 2 + 58,
+            'CHALLENGE',
+            () => {
+                this.selectLaunchMode('challenge');
+                this.enterRoundFromGate();
+            },
+            UI_THEME.palette.accentAlt,
+            {
+                width: 220,
+            },
+        );
+        this.setButtonEnabled(challengeButton, Boolean(sharedChallengeSeed));
+
+        const enterCodeButton = this.makeButton(
+            GAME_W / 2,
+            GAME_H / 2 + 110,
+            'ENTER CODE',
+            () => this.showCodeEntryOverlay(),
+            UI_THEME.palette.surfaceRaised,
+            {
+                width: 220,
+            },
+        );
+
+        this.startOverlay = this.add.container(0, 0, [
+            blocker,
+            panel,
+            heading,
+            body,
+            freePlayButton.container,
+            challengeButton.container,
+            enterCodeButton.container,
+        ]);
         this.startOverlay.setDepth(200);
         this.startOverlay.setAlpha(0);
 
@@ -331,6 +370,166 @@ export class GameScene extends Phaser.Scene {
                 this.startRound();
             },
         });
+    }
+
+    private showCodeEntryOverlay(): void {
+        this.codeEntryOverlay?.destroy(true);
+
+        const blocker = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W,
+            GAME_H,
+            UI_THEME.palette.backdropDeep,
+            0.82,
+        );
+
+        const panel = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2,
+            GAME_W - 88,
+            252,
+            UI_THEME.palette.surfaceBase,
+            0.97,
+        );
+
+        const title = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 86, 'ENTER CODE', {
+                ...uiTextStyles.title(),
+                fontSize: '24px',
+            })
+            .setOrigin(0.5)
+            .setScale(0.8);
+
+        const hint = this.add
+            .text(
+                GAME_W / 2,
+                GAME_H / 2 - 46,
+                'Start a deterministic seeded run.\nEnter a custom code to replay the same board.',
+                {
+                    ...uiTextStyles.body(),
+                    fontSize: '12px',
+                    align: 'center',
+                    lineSpacing: 4,
+                },
+            )
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+
+        const errorText = this.add
+            .text(GAME_W / 2, GAME_H / 2 + 8, '', {
+                ...uiTextStyles.body(),
+                fontSize: '12px',
+                align: 'center',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.danger));
+
+        const inputBox = this.add.rectangle(
+            GAME_W / 2,
+            GAME_H / 2 - 16,
+            GAME_W - 152,
+            42,
+            UI_THEME.palette.surfaceMuted,
+            0.65,
+        );
+        inputBox.setStrokeStyle(1, UI_THEME.palette.borderSoft, 0.5);
+
+        const inputText = this.add
+            .text(GAME_W / 2, GAME_H / 2 - 16, '', {
+                ...uiTextStyles.body(),
+                fontSize: '18px',
+            })
+            .setOrigin(0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textStrong));
+
+        let startButton: UIButton | null = null;
+        const { inputField, focus, cleanup } = this.createOverlayTextInput({
+            centerX: GAME_W / 2,
+            centerY: GAME_H / 2 - 16,
+            width: GAME_W - 152,
+            height: 42,
+            initialValue: this.activeRunContext.launchMode === 'enter-code' ? this.activeRunContext.seedKey ?? '' : '',
+            placeholder: 'Enter a seed...',
+            maxLength: 24,
+            ariaLabel: 'Seed code',
+            autocomplete: 'off',
+            autocapitalize: 'characters',
+            onInput: (value) => {
+                inputText.setText(value);
+                errorText.setText('');
+                if (startButton) {
+                    this.setButtonEnabled(startButton, value.trim().length > 0);
+                }
+            },
+            onEnter: () => startButton?.onClick(),
+        });
+
+        startButton = this.makeButton(
+            GAME_W / 2 - 70,
+            GAME_H / 2 + 72,
+            'START',
+            () => {
+                const nextSeed = inputField.value.trim();
+                if (nextSeed.length === 0) {
+                    errorText.setText('Enter a code to start a seeded run.');
+                    return;
+                }
+
+                this.selectLaunchMode('enter-code', nextSeed);
+                this.codeEntryOverlay?.destroy(true);
+                this.codeEntryOverlay = null;
+                this.enterRoundFromGate();
+            },
+            UI_THEME.palette.accent,
+            {
+                width: 100,
+                height: 34,
+                fontSize: 12,
+            },
+        );
+        inputText.setText(inputField.value);
+        this.setButtonEnabled(startButton, inputField.value.trim().length > 0);
+
+        const cancelButton = this.makeButton(
+            GAME_W / 2 + 70,
+            GAME_H / 2 + 72,
+            'CANCEL',
+            () => {
+                this.codeEntryOverlay?.destroy(true);
+                this.codeEntryOverlay = null;
+            },
+            UI_THEME.palette.surfaceRaised,
+            {
+                width: 100,
+                height: 34,
+                fontSize: 12,
+            },
+        );
+
+        this.codeEntryOverlay = this.add.container(0, 0, [
+            blocker,
+            panel,
+            title,
+            hint,
+            inputBox,
+            inputText,
+            errorText,
+            startButton.container,
+            cancelButton.container,
+        ]);
+        this.codeEntryOverlay.setDepth(220);
+        this.codeEntryOverlay.setAlpha(0);
+        this.codeEntryOverlay.once('destroy', cleanup);
+
+        this.tweens.add({
+            targets: this.codeEntryOverlay,
+            alpha: 1,
+            duration: 160,
+            ease: 'Sine.easeOut',
+        });
+
+        window.requestAnimationFrame(focus);
     }
 
     private showProfileGate(): void {
@@ -482,6 +681,41 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    private ensureLaunchSelection(): void {
+        const existingMode = this.registry.get(RUN_LAUNCH_MODE_REGISTRY_KEY);
+        if (existingMode !== 'free-play' && existingMode !== 'challenge' && existingMode !== 'enter-code') {
+            this.registry.set(RUN_LAUNCH_MODE_REGISTRY_KEY, 'free-play');
+        }
+    }
+
+    private getSharedChallengeSeed(): string | null {
+        const sharedSeed = import.meta.env.VITE_SHARED_DAILY_SEED;
+        return typeof sharedSeed === 'string' && sharedSeed.trim().length > 0 ? sharedSeed.trim() : null;
+    }
+
+    private syncRunContext(): void {
+        this.activeRunContext = resolveRunContext({
+            launchMode: this.registry.get(RUN_LAUNCH_MODE_REGISTRY_KEY),
+            manualSeed: this.registry.get(RUN_SEED_REGISTRY_KEY),
+            sharedSeed: this.getSharedChallengeSeed() ?? undefined,
+        });
+        this.activeRunSeed = this.activeRunContext.seedKey;
+        this.highScoreStore = createHighScoreStore(undefined, this.activeRunContext.highScoreStorageKey);
+        this.highScore = this.highScoreStore.get();
+        this.modeText?.setText(this.activeRunContext.modeLabel);
+        this.highScoreText?.setText(`High: ${this.highScore}`);
+    }
+
+    private selectLaunchMode(mode: LaunchMode, seed?: string | null): void {
+        this.registry.set(RUN_LAUNCH_MODE_REGISTRY_KEY, mode);
+        if (seed && seed.trim().length > 0) {
+            this.registry.set(RUN_SEED_REGISTRY_KEY, seed.trim());
+        } else {
+            this.registry.remove(RUN_SEED_REGISTRY_KEY);
+        }
+        this.syncRunContext();
+    }
+
     private createOverlayTextInput(options: {
         centerX: number;
         centerY: number;
@@ -489,19 +723,24 @@ export class GameScene extends Phaser.Scene {
         height: number;
         initialValue?: string;
         placeholder?: string;
+        maxLength?: number;
+        ariaLabel?: string;
+        autocomplete?: string;
+        autocapitalize?: string;
+        inputMode?: 'text' | 'search' | 'none' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal';
         onInput: (value: string) => void;
         onEnter: () => void;
     }): OverlayTextInput {
         const inputField = document.createElement('input');
         inputField.type = 'text';
-        inputField.maxLength = 20;
+        inputField.maxLength = options.maxLength ?? 20;
         inputField.value = options.initialValue ?? '';
         inputField.placeholder = options.placeholder ?? '';
-        inputField.inputMode = 'text';
-        inputField.autocapitalize = 'words';
+        inputField.inputMode = options.inputMode ?? 'text';
+        inputField.autocapitalize = options.autocapitalize ?? 'words';
         inputField.spellcheck = false;
-        inputField.setAttribute('aria-label', 'Display name');
-        inputField.setAttribute('autocomplete', 'nickname');
+        inputField.setAttribute('aria-label', options.ariaLabel ?? 'Display name');
+        inputField.setAttribute('autocomplete', options.autocomplete ?? 'nickname');
         inputField.style.position = 'absolute';
         inputField.style.zIndex = '1000';
         inputField.style.margin = '0';
@@ -672,7 +911,7 @@ export class GameScene extends Phaser.Scene {
             .text(
                 GAME_W / 2,
                 GAME_H / 2 - 206,
-                `Profile: ${this.playerProfile.displayName}`,
+                `Profile: ${this.playerProfile.displayName} • ${this.activeRunContext.modeLabel}`,
                 {
                     ...uiTextStyles.body(),
                     fontSize: '12px',
@@ -955,7 +1194,7 @@ export class GameScene extends Phaser.Scene {
                 }
 
                 this.playerProfile = updatePlayerDisplayName(this.playerProfile, nextName);
-                this.leaderboardProfileText?.setText(`Profile: ${this.playerProfile.displayName}`);
+                this.leaderboardProfileText?.setText(`Profile: ${this.playerProfile.displayName} • ${this.activeRunContext.modeLabel}`);
                 this.showFeedback('Name updated', UI_THEME.palette.success, 1200);
                 this.destroySettingsOverlay();
             },
@@ -1542,6 +1781,14 @@ export class GameScene extends Phaser.Scene {
             .text(GAME_W - 28, 70, `High: ${this.highScore}`, uiTextStyles.metric())
             .setOrigin(1, 0.5);
 
+        this.modeText = this.add
+            .text(GAME_W / 2, 98, this.activeRunContext.modeLabel, {
+                ...uiTextStyles.label(),
+                fontSize: '12px',
+            })
+            .setOrigin(0.5, 0.5)
+            .setColor(themeColorHex(UI_THEME.palette.textMuted));
+
         // Current word display
         this.currentWordText = this.add
             .text(GAME_W / 2, HUD_BOTTOM_ANCHOR_Y + 24, '', uiTextStyles.currentWord())
@@ -1697,6 +1944,7 @@ export class GameScene extends Phaser.Scene {
 
         this.scoreText.setText(`Score: ${this.roundState.score}`);
         this.highScoreText.setText(`High: ${this.highScore}`);
+        this.modeText.setText(this.activeRunContext.modeLabel);
 
         // Word list
         this.wordListText.setText(this.formatWordHistory(this.roundState.wordHistory));

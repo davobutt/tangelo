@@ -48,8 +48,8 @@ Content-Type: application/json
 - `playerGUID`: Required, non-empty string, max 256 chars (UUID recommended)
 - `displayName`: Required, non-empty string, max 128 chars
 - `score`: Required, integer 0–1,000,000
-- `runMode`: Optional, `normal` or `seeded` (defaults to `normal`)
-- `seedKey`: Required when `runMode` is `seeded`
+- `runMode`: Optional, `normal`, `challenge`, or `seeded` (defaults to `normal`)
+- `seedKey`: Required when `runMode` is `challenge` or `seeded`
 
 **Merge Rules**:
 - Identity is keyed by `playerGUID` within a score category
@@ -103,12 +103,13 @@ Retrieve ranked entries sorted by score descending, then by submission time asce
 ```
 GET /api/leaderboard?limit=100
 GET /api/leaderboard?limit=100&runMode=seeded&seedKey=family-night
+GET /api/leaderboard?limit=100&runMode=challenge&seedKey=weekly-puzzle
 ```
 
 **Query Parameters**:
 - `limit` (optional): Number of entries to return. Default: 100, Max: 1000
-- `runMode` (optional): `normal` or `seeded`. Default: `normal`
-- `seedKey` (required when `runMode=seeded`): Seed identifier to compare within a seeded challenge
+- `runMode` (optional): `normal`, `challenge`, or `seeded`. Default: `normal`
+- `seedKey` (required when `runMode=challenge` or `runMode=seeded`): Seed identifier to compare within the selected mode category
 
 **Response** (200 OK):
 ```json
@@ -160,7 +161,7 @@ GET /api/leaderboard?limit=100&runMode=seeded&seedKey=family-night
   displayName: string;      // Human-readable player name
   score: number;            // Score value (0-1,000,000)
   submittedAt: number;      // Submission timestamp (milliseconds since epoch)
-  runMode: 'normal' | 'seeded';
+  runMode: 'normal' | 'challenge' | 'seeded';
   seedKey: string | null;
 }
 ```

@@ -77,31 +77,39 @@ function testDatastoreOperations(): void {
         throw new Error(`Expected 2 entries, got ${limited.length}`);
     }
 
-    // Test 7: Seeded challenge scores are tracked separately by seed
-    console.log('  ✓ Test 7: Seeded challenge scores are separated by seed');
+    // Test 7: Challenge and custom seeded scores are tracked separately
+    console.log('  ✓ Test 7: Challenge and custom seeded scores are separated by mode and seed');
     datastore.submitScore('player-1', 'Alice Renamed', 900, { runMode: 'seeded', seedKey: 'family-night' });
     datastore.submitScore('player-2', 'Alex', 1250, { runMode: 'seeded', seedKey: 'family-night' });
-    datastore.submitScore('player-3', 'Alex', 1500, { runMode: 'seeded', seedKey: 'daily-2026-04-20' });
+    datastore.submitScore('player-3', 'Alex', 1500, { runMode: 'challenge', seedKey: 'family-night' });
+    datastore.submitScore('player-4', 'Casey', 1340, { runMode: 'challenge', seedKey: 'daily-2026-04-20' });
 
     const familySeedLeaderboard = datastore.getLeaderboard(10, { runMode: 'seeded', seedKey: 'family-night' });
-    const dailySeedLeaderboard = datastore.getLeaderboard(10, { runMode: 'seeded', seedKey: 'daily-2026-04-20' });
+    const familyChallengeLeaderboard = datastore.getLeaderboard(10, { runMode: 'challenge', seedKey: 'family-night' });
+    const dailyChallengeLeaderboard = datastore.getLeaderboard(10, { runMode: 'challenge', seedKey: 'daily-2026-04-20' });
 
     if (familySeedLeaderboard.length !== 2) {
         throw new Error(`Expected 2 entries for family-night seeded leaderboard, got ${familySeedLeaderboard.length}`);
     }
-    if (dailySeedLeaderboard.length !== 1) {
-        throw new Error(`Expected 1 entry for daily seeded leaderboard, got ${dailySeedLeaderboard.length}`);
+    if (familyChallengeLeaderboard.length !== 1) {
+        throw new Error(`Expected 1 entry for family-night challenge leaderboard, got ${familyChallengeLeaderboard.length}`);
+    }
+    if (dailyChallengeLeaderboard.length !== 1) {
+        throw new Error(`Expected 1 entry for daily challenge leaderboard, got ${dailyChallengeLeaderboard.length}`);
     }
     if (familySeedLeaderboard.some((entry) => entry.seedKey !== 'family-night')) {
         throw new Error('Family seeded leaderboard should only contain family-night scores');
     }
-    if (dailySeedLeaderboard[0]?.seedKey !== 'daily-2026-04-20') {
-        throw new Error('Daily seeded leaderboard should only contain daily seed scores');
+    if (familyChallengeLeaderboard[0]?.runMode !== 'challenge') {
+        throw new Error('Family challenge leaderboard should only contain challenge-mode scores');
+    }
+    if (dailyChallengeLeaderboard[0]?.seedKey !== 'daily-2026-04-20') {
+        throw new Error('Daily challenge leaderboard should only contain daily challenge scores');
     }
     if (leaderboard.some((entry) => entry.runMode !== 'normal')) {
-        throw new Error('Normal leaderboard should not include seeded entries');
+        throw new Error('Normal leaderboard should not include seeded or challenge entries');
     }
-    console.log('    Seeded challenge categories are isolated correctly');
+    console.log('    Seeded and challenge categories are isolated correctly');
 
     datastore.close();
     console.log('  ✅ All datastore tests passed!\n');
@@ -209,6 +217,20 @@ function testValidation(): void {
         throw new Error('Valid seeded payload failed validation');
     }
     console.log('    Valid seeded payload accepted');
+
+    // Test 9: Challenge payload accepts seedKey
+    console.log('  ✓ Test 9: Challenge payload accepts seedKey');
+    const challengeValid = {
+        playerGUID: '550e8400-e29b-41d4-a716-446655440000',
+        displayName: 'Alice',
+        score: 1450,
+        runMode: 'challenge',
+        seedKey: 'weekly',
+    };
+    if (!validateScoreSubmission(challengeValid)) {
+        throw new Error('Valid challenge payload failed validation');
+    }
+    console.log('    Valid challenge payload accepted');
 
     console.log('  ✅ All validation tests passed!\n');
 }

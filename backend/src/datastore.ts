@@ -19,19 +19,19 @@ export interface IDatastore {
 }
 
 function normalizeLeaderboardQuery(query?: Partial<LeaderboardQuery>): LeaderboardQuery {
-    if (query?.runMode === 'seeded') {
+    if (query?.runMode === 'seeded' || query?.runMode === 'challenge') {
         const seedKey = query.seedKey?.trim();
         if (!seedKey) {
             throw new Error('seedKey required for seeded leaderboard queries');
         }
-        return { runMode: 'seeded', seedKey };
+        return { runMode: query.runMode, seedKey };
     }
 
     return { runMode: 'normal', seedKey: null };
 }
 
 function buildCategoryKey(query: LeaderboardQuery): string {
-    return query.runMode === 'seeded' ? `seeded:${query.seedKey}` : 'normal';
+    return query.runMode === 'normal' ? 'normal' : `${query.runMode}:${query.seedKey}`;
 }
 
 class SqliteDatastore implements IDatastore {

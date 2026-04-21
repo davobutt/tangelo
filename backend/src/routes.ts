@@ -6,17 +6,41 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { IDatastore } from './datastore.js';
-import { validateScoreSubmission, ApiError, LeaderboardResponse, type LeaderboardQuery } from './types.js';
+import {
+    validateScoreSubmission,
+    ApiError,
+    LeaderboardResponse,
+    type LeaderboardQuery,
+    type ScoreSubmissionPayload,
+} from './types.js';
 
 function parseLeaderboardQuery(req: Request): LeaderboardQuery {
-    const runMode = req.query.runMode === 'seeded' ? 'seeded' : 'normal';
-    const seedKey = runMode === 'seeded'
-        ? String(req.query.seedKey ?? '').trim() || null
-        : null;
+    const requestedMode = String(req.query.runMode ?? '').trim();
+    const runMode = requestedMode === 'challenge'
+        ? 'challenge'
+        : requestedMode === 'seeded'
+            ? 'seeded'
+            : 'normal';
+    const seedKey = runMode === 'normal'
+        ? null
+        : String(req.query.seedKey ?? '').trim() || null;
 
-    if (runMode === 'seeded' && !seedKey) {
+    if (runMode !== 'normal' && !seedKey) {
         throw new Error('seedKey required for seeded leaderboard queries');
     }
+
+    return { runMode, seedKey };
+}
+
+function parseSubmissionRunMode(payload: ScoreSubmissionPayload): LeaderboardQuery {
+    const runMode = payload.runMode === 'challenge'
+        ? 'challenge'
+        : payload.runMode === 'seeded'
+            ? 'seeded'
+            : 'normal';
+    const seedKey = runMode === 'normal'
+        ? null
+        : String(payload.seedKey ?? '').trim();
 
     return { runMode, seedKey };
 }
@@ -47,8 +71,7 @@ export function createApiRouter(datastore: IDatastore): Router {
             const playerGUID = String(payload.playerGUID).trim();
             const displayName = String(payload.displayName).trim();
             const score = Math.floor(payload.score);
-            const runMode = payload.runMode === 'seeded' ? 'seeded' : 'normal';
-            const seedKey = runMode === 'seeded' ? String(payload.seedKey).trim() : null;
+            const { runMode, seedKey } = parseSubmissionRunMode(payload);
 
             // Submit to datastore
             const entry = datastore.submitScore(playerGUID, displayName, score, { runMode, seedKey });

@@ -104,13 +104,17 @@ describe('createHighScoreStore', () => {
         const storage = new MemoryStorage();
         const normalStore = createHighScoreStore(storage);
         const seededStore = createHighScoreStore(storage, 'tangelo.seeded.family-night.highScore');
+        const challengeStore = createHighScoreStore(storage, 'tangelo.challenge.family-night.highScore');
 
         normalStore.set(12);
         seededStore.set(30);
+        challengeStore.set(27);
 
         expect(normalStore.get()).toBe(12);
         expect(seededStore.get()).toBe(30);
+        expect(challengeStore.get()).toBe(27);
         expect(storage.getItem('tangelo.endless.highScore')).toBe('12');
         expect(storage.getItem('tangelo.seeded.family-night.highScore')).toBe('30');
+        expect(storage.getItem('tangelo.challenge.family-night.highScore')).toBe('27');
     });
 });

@@ -2,7 +2,7 @@
  * Data model types and interfaces for leaderboard
  */
 
-export type RunMode = 'normal' | 'seeded';
+export type RunMode = 'normal' | 'challenge' | 'seeded';
 
 export interface LeaderboardEntry {
     id: string; // UUID
@@ -63,11 +63,11 @@ export function validateScoreSubmission(payload: unknown): payload is ScoreSubmi
         return false;
     }
 
-    if (p.runMode !== undefined && p.runMode !== 'normal' && p.runMode !== 'seeded') {
+    if (p.runMode !== undefined && p.runMode !== 'normal' && p.runMode !== 'challenge' && p.runMode !== 'seeded') {
         return false;
     }
 
-    if (p.runMode === 'seeded') {
+    if (p.runMode === 'seeded' || p.runMode === 'challenge') {
         if (typeof p.seedKey !== 'string' || p.seedKey.trim().length === 0 || p.seedKey.length > 256) {
             return false;
         }
