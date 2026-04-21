@@ -1,5 +1,5 @@
 /**
- * Main Express server for Boggle leaderboard backend
+ * Main Express server for the Tangelo leaderboard backend
  */
 
 import express from 'express';
@@ -20,7 +20,7 @@ function isAllowedOrigin(origin: string): boolean {
         return true;
     }
 
-    return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+    return /^https?:\/\/(localhost|127\.0\.0\.1|mini\.local)(:\d+)?$/.test(origin);
 }
 
 // Middleware
@@ -87,7 +87,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Start server
 app.listen(config.port, () => {
-    console.log(`🎮 Boggle Leaderboard Backend running on port ${config.port}`);
+    console.log(`🎮 Tangelo Leaderboard Backend running on port ${config.port}`);
     console.log(`📊 Environment: ${config.environment}`);
     console.log(`💾 Datastore: ${config.datastore.type}`);
     console.log(`📡 Health check: http://localhost:${config.port}/health`);

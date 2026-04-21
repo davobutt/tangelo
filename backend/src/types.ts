@@ -78,6 +78,15 @@ export function createChallengeLeaderboardSeedKey(seedCode: string, updatedAt: n
     return `challenge:${seedCode}:${updatedAt}`;
 }
 
+export function createDefaultActiveChallenge(): ActiveChallenge {
+    const seedCode = 'lemon';
+    return {
+        seedCode,
+        leaderboardSeedKey: 'challenge:lemon:default',
+        updatedAt: 0,
+    };
+}
+
 /**
  * Validation for score submission
  */

@@ -11,6 +11,7 @@ export interface RunContext {
     highScoreStorageKey: string;
     leaderboardLabel: string;
     modeLabel: string;
+    leaderboardModeLabel: string;
 }
 
 export interface ActiveChallengeConfig {
@@ -64,6 +65,11 @@ function normalizeLaunchMode(mode: unknown): LaunchMode | null {
     }
 }
 
+function formatChallengeSeedLabel(seed: string): string {
+    const trimmed = seed.trim();
+    return /^[a-zA-Z]{5}$/.test(trimmed) ? formatSeedCodeLabel(trimmed) : trimmed;
+}
+
 export function createSeededHighScoreKey(seedKey: string): string {
     return `tangelo.seeded.${encodeURIComponent(seedKey)}.highScore`;
 }
@@ -85,32 +91,37 @@ export function resolveRunContext(options: RunContextOptions = {}): RunContext {
             highScoreStorageKey: createSeededHighScoreKey(manualSeed),
             leaderboardLabel: `Top players (code ${codeLabel})`,
             modeLabel: `CODE ${codeLabel}`,
+            leaderboardModeLabel: `CODE ${codeLabel}`,
         };
     }
 
     const activeChallenge = normalizeActiveChallenge(options.activeChallenge);
     if (launchMode === 'challenge' && activeChallenge) {
+        const challengeLabel = formatChallengeSeedLabel(activeChallenge.seedCode);
         return {
             mode: 'challenge',
             launchMode: 'challenge',
             boardSeed: activeChallenge.seedCode,
             leaderboardSeedKey: activeChallenge.leaderboardSeedKey,
             highScoreStorageKey: createChallengeHighScoreKey(activeChallenge.leaderboardSeedKey),
-            leaderboardLabel: 'Top players (challenge)',
+            leaderboardLabel: `Top players (challenge ${challengeLabel})`,
             modeLabel: 'CHALLENGE',
+            leaderboardModeLabel: `CHALLENGE ${challengeLabel}`,
         };
     }
 
     const sharedSeed = normalizeSeed(options.sharedSeed);
     if ((launchMode === 'challenge' || (!launchMode && sharedSeed)) && sharedSeed) {
+        const challengeLabel = formatChallengeSeedLabel(sharedSeed);
         return {
             mode: 'challenge',
             launchMode: 'challenge',
             boardSeed: sharedSeed,
             leaderboardSeedKey: sharedSeed,
             highScoreStorageKey: createChallengeHighScoreKey(sharedSeed),
-            leaderboardLabel: 'Top players (challenge)',
+            leaderboardLabel: `Top players (challenge ${challengeLabel})`,
             modeLabel: 'CHALLENGE',
+            leaderboardModeLabel: `CHALLENGE ${challengeLabel}`,
         };
     }
 
@@ -122,5 +133,6 @@ export function resolveRunContext(options: RunContextOptions = {}): RunContext {
         highScoreStorageKey: NORMAL_HIGH_SCORE_KEY,
         leaderboardLabel: 'Top players (free play)',
         modeLabel: 'FREE PLAY',
+        leaderboardModeLabel: 'FREE PLAY',
     };
 }

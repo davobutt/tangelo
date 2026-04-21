@@ -55,11 +55,24 @@ export interface FetchLeaderboardOptions {
     seedKey?: string;
 }
 
-const DEFAULT_API_BASE = '';
+const DEFAULT_BACKEND_PORT = '3000';
+const DEFAULT_API_BASE = 'http://localhost:3000';
 
 function resolveApiBase(): string {
     const fromEnv = import.meta.env.VITE_LEADERBOARD_API_URL as string | undefined;
-    return (fromEnv && fromEnv.trim()) || DEFAULT_API_BASE;
+    if (fromEnv && fromEnv.trim()) {
+        return fromEnv.trim();
+    }
+
+    if (typeof window !== 'undefined') {
+        const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+        const hostname = window.location.hostname.trim();
+        if (hostname) {
+            return `${protocol}//${hostname}:${DEFAULT_BACKEND_PORT}`;
+        }
+    }
+
+    return DEFAULT_API_BASE;
 }
 
 async function readErrorMessage(response: Response): Promise<string> {

@@ -14,6 +14,7 @@ import {
     ActiveChallengeResponse,
     LeaderboardResponse,
     createChallengeLeaderboardSeedKey,
+    createDefaultActiveChallenge,
     normalizeChallengeSeedCode,
     normalizeLeaderboardSeedKey,
     type LeaderboardQuery,
@@ -85,17 +86,7 @@ export function createApiRouter(datastore: IDatastore, options: ApiRouterOptions
 
     router.get('/challenge/current', (req: Request, res: Response) => {
         try {
-            const activeChallenge = datastore.getActiveChallenge();
-            if (!activeChallenge) {
-                const error: ApiError = {
-                    status: 404,
-                    code: 'NO_ACTIVE_CHALLENGE',
-                    message: 'No active challenge is configured.',
-                    timestamp: Date.now(),
-                };
-                res.status(404).json(error);
-                return;
-            }
+            const activeChallenge = datastore.getActiveChallenge() ?? createDefaultActiveChallenge();
 
             const response: ActiveChallengeResponse = {
                 activeChallenge,

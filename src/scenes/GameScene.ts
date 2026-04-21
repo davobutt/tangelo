@@ -971,7 +971,7 @@ export class GameScene extends Phaser.Scene {
             .text(
                 GAME_W / 2,
                 GAME_H / 2 - 206,
-                `Profile: ${this.playerProfile.displayName} • ${this.activeRunContext.modeLabel}`,
+                `Profile: ${this.playerProfile.displayName} • ${this.activeRunContext.leaderboardModeLabel}`,
                 {
                     ...uiTextStyles.body(),
                     fontSize: '12px',
@@ -997,35 +997,9 @@ export class GameScene extends Phaser.Scene {
             wordWrap: { width: GAME_W - 140 },
         }).setOrigin(0.5, 0);
 
-        const editNameButton = this.makeButton(
-            GAME_W / 2 - 112,
-            GAME_H / 2 + 181,
-            'EDIT NAME',
-            () => this.showEditNameOverlay(),
-            UI_THEME.palette.accentAlt,
-            {
-                width: 106,
-                height: 32,
-                fontSize: 12,
-            },
-        );
-
-        const resetLocalButton = this.makeButton(
-            GAME_W / 2,
-            GAME_H / 2 + 181,
-            'RESET LOCAL',
-            () => this.showResetConfirmOverlay(),
-            UI_THEME.palette.danger,
-            {
-                width: 114,
-                height: 32,
-                fontSize: 12,
-            },
-        );
-
         const refreshButton = this.makeButton(
-            GAME_W / 2 + 112,
-            GAME_H / 2 + 224,
+            GAME_W / 2 + 62,
+            GAME_H / 2 + 205,
             'REFRESH',
             () => this.refreshLeaderboard(),
             UI_THEME.palette.accent,
@@ -1037,8 +1011,8 @@ export class GameScene extends Phaser.Scene {
         );
 
         const closeButton = this.makeButton(
-            GAME_W / 2,
-            GAME_H / 2 + 224,
+            GAME_W / 2 - 62,
+            GAME_H / 2 + 205,
             'CLOSE',
             () => this.closeLeaderboardOverlay(),
             UI_THEME.palette.surfaceRaised,
@@ -1048,20 +1022,6 @@ export class GameScene extends Phaser.Scene {
                 fontSize: 13,
             },
         );
-
-        const resetHelp = this.add
-            .text(
-                GAME_W / 2,
-                GAME_H / 2 + 205,
-                'Reset clears only this device profile and local high score.',
-                {
-                    ...uiTextStyles.body(),
-                    fontSize: '11px',
-                    align: 'center',
-                },
-            )
-            .setOrigin(0.5)
-            .setColor(themeColorHex(UI_THEME.palette.textMuted));
 
         this.leaderboardStatusText = status;
         this.leaderboardEntriesText = entries;
@@ -1074,9 +1034,6 @@ export class GameScene extends Phaser.Scene {
             profileText,
             status,
             entries,
-            editNameButton.container,
-            resetLocalButton.container,
-            resetHelp,
             refreshButton.container,
             closeButton.container,
         ]);
@@ -1254,7 +1211,9 @@ export class GameScene extends Phaser.Scene {
                 }
 
                 this.playerProfile = updatePlayerDisplayName(this.playerProfile, nextName);
-                this.leaderboardProfileText?.setText(`Profile: ${this.playerProfile.displayName} • ${this.activeRunContext.modeLabel}`);
+                this.leaderboardProfileText?.setText(
+                    `Profile: ${this.playerProfile.displayName} • ${this.activeRunContext.leaderboardModeLabel}`,
+                );
                 this.showFeedback('Name updated', UI_THEME.palette.success, 1200);
                 this.destroySettingsOverlay();
             },

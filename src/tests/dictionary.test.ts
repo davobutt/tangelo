@@ -41,8 +41,8 @@ describe('DictionaryService', () => {
     });
 
     it('loads the bundled default dictionary from words.txt', () => {
-        expect(fullDictionary.has('a')).toBe(true);
-        expect(fullDictionary.has('2d')).toBe(true);
-        expect(fullDictionary.has('10-point')).toBe(true);
+        expect(fullDictionary.has('aa')).toBe(true);
+        expect(fullDictionary.has('aardvark')).toBe(true);
+        expect(fullDictionary.has('abacus')).toBe(true);
     });
 });

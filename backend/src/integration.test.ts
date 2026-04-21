@@ -5,6 +5,7 @@
 
 import { IDatastore, createDatastore } from './datastore.js';
 import {
+    createDefaultActiveChallenge,
     createChallengeLeaderboardSeedKey,
     validateScoreSubmission,
 } from './types.js';
@@ -167,6 +168,23 @@ function testDatastoreOperations(): void {
     console.log('  ✅ All datastore tests passed!\n');
 }
 
+function testDefaultActiveChallenge(): void {
+    console.log('🧪 Testing active challenge fallback...');
+
+    const fallbackChallenge = createDefaultActiveChallenge();
+    if (fallbackChallenge.seedCode !== 'lemon') {
+        throw new Error(`Expected default active challenge seedCode lemon, got ${fallbackChallenge.seedCode}`);
+    }
+    if (fallbackChallenge.leaderboardSeedKey !== 'challenge:lemon:default') {
+        throw new Error(`Expected stable default leaderboard identity, got ${fallbackChallenge.leaderboardSeedKey}`);
+    }
+    if (fallbackChallenge.updatedAt !== 0) {
+        throw new Error(`Expected default active challenge updatedAt 0, got ${fallbackChallenge.updatedAt}`);
+    }
+
+    console.log('  ✅ Default active challenge fallback verified!\n');
+}
+
 function testValidation(): void {
     console.log('🧪 Testing payload validation...');
 
@@ -293,6 +311,7 @@ async function main(): Promise<void> {
 
     try {
         testDatastoreOperations();
+        testDefaultActiveChallenge();
         testValidation();
 
         console.log('='.repeat(50));

@@ -11,6 +11,7 @@ describe('resolveRunContext', () => {
             highScoreStorageKey: 'tangelo.endless.highScore',
             leaderboardLabel: 'Top players (free play)',
             modeLabel: 'FREE PLAY',
+            leaderboardModeLabel: 'FREE PLAY',
         });
     });
 
@@ -23,6 +24,7 @@ describe('resolveRunContext', () => {
             highScoreStorageKey: 'tangelo.seeded.apple.highScore',
             leaderboardLabel: 'Top players (code APPLE)',
             modeLabel: 'CODE APPLE',
+            leaderboardModeLabel: 'CODE APPLE',
         });
     });
 
@@ -39,8 +41,9 @@ describe('resolveRunContext', () => {
             boardSeed: 'apple',
             leaderboardSeedKey: 'challenge:apple:101',
             highScoreStorageKey: 'tangelo.challenge.challenge%3Aapple%3A101.highScore',
-            leaderboardLabel: 'Top players (challenge)',
+            leaderboardLabel: 'Top players (challenge APPLE)',
             modeLabel: 'CHALLENGE',
+            leaderboardModeLabel: 'CHALLENGE APPLE',
         });
     });
 
@@ -51,8 +54,9 @@ describe('resolveRunContext', () => {
             boardSeed: 'daily-2026-04-20',
             leaderboardSeedKey: 'daily-2026-04-20',
             highScoreStorageKey: 'tangelo.challenge.daily-2026-04-20.highScore',
-            leaderboardLabel: 'Top players (challenge)',
+            leaderboardLabel: 'Top players (challenge daily-2026-04-20)',
             modeLabel: 'CHALLENGE',
+            leaderboardModeLabel: 'CHALLENGE daily-2026-04-20',
         });
     });
 
@@ -65,6 +69,7 @@ describe('resolveRunContext', () => {
             highScoreStorageKey: 'tangelo.endless.highScore',
             leaderboardLabel: 'Top players (free play)',
             modeLabel: 'FREE PLAY',
+            leaderboardModeLabel: 'FREE PLAY',
         });
     });
 
@@ -83,6 +88,7 @@ describe('resolveRunContext', () => {
             highScoreStorageKey: 'tangelo.endless.highScore',
             leaderboardLabel: 'Top players (free play)',
             modeLabel: 'FREE PLAY',
+            leaderboardModeLabel: 'FREE PLAY',
         });
     });
 });

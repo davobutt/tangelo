@@ -1,7 +1,7 @@
 {
-    "name": "boggle-leaderboard-backend",
+    "name": "tangelo-leaderboard-backend",
     "version": "1.0.0",
-    "description": "Backend service for Boggle game leaderboard and player identity",
+    "description": "Backend service for Tangelo leaderboard and player identity",
     "type": "module",
     "main": "dist/server.js",
     "scripts": {
@@ -12,7 +12,7 @@
         "lint": "eslint src"
     },
     "keywords": [
-        "boggle",
+        "tangelo",
         "leaderboard",
         "api"
     ],
